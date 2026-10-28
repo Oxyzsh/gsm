@@ -666,7 +666,7 @@ func (c *controller) detectFromATLocked(ctx context.Context) {
 		identityText.WriteString(strings.Join(reply.Lines, "\n"))
 		identityText.WriteByte('\n')
 		if revision == "" {
-			revision = revisionFromReply(reply)
+			revision = revisionFromReply(command, reply)
 		}
 	}
 	if !receivedIdentityReply {
@@ -718,7 +718,10 @@ func (c *controller) applyDetectedIdentity(detectedType, detectedFirmware string
 }
 
 // revisionFromReply 从 ATI/AT+CGMR 的应答里取版本号字符串。
-func revisionFromReply(reply at.Reply) string {
+//
+// ATI 只认 "Revision:" 前缀（否则会把 "Fibocom"、"Quectel" 这种厂商名当成版本号，
+// L610 的 ATI 第一行就是 Fibocom）；裸版本号只从 AT+CGMR 取。
+func revisionFromReply(command string, reply at.Reply) string {
 	for _, line := range reply.Lines {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.EqualFold(line, "OK") {
@@ -728,7 +731,9 @@ func revisionFromReply(reply at.Reply) string {
 			return strings.TrimSpace(line[len("revision:"):])
 		}
 	}
-	// AT+CGMR 的应答通常只有一行裸版本号。
+	if !strings.EqualFold(strings.TrimSpace(command), "AT+CGMR") {
+		return ""
+	}
 	for _, line := range reply.Lines {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.EqualFold(line, "OK") || strings.Contains(strings.ToLower(line), "revision:") {
