@@ -1,0 +1,25 @@
+[Unit]
+Description=PESS GSM (4G module) service
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/gsmd -config /etc/gsm/gsm.yaml
+Restart=on-failure
+RestartPreventExitStatus=2
+RestartSec=3s
+User=gsmd
+Group=dialout
+SupplementaryGroups=dialout
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target

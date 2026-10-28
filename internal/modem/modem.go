@@ -1,0 +1,610 @@
+package modem
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"os"
+	"regexp"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"go-pess/platform/user/pess/gsm/internal/at"
+)
+
+type Status int
+
+const (
+	StatusDisabled Status = iota
+	StatusNoHW
+	StatusNoCard
+	StatusNoSignal
+	StatusDialFail
+	StatusBusy
+	StatusOK
+	StatusOperationFailed
+)
+
+func (s Status) String() string {
+	switch s {
+	case StatusDisabled:
+		return "HW Disabled"
+	case StatusNoHW:
+		return "No hardware"
+	case StatusNoCard:
+		return "No sim-card"
+	case StatusNoSignal:
+		return "No signal"
+	case StatusDialFail:
+		return "Dial fail"
+	case StatusBusy:
+		return "Busy"
+	case StatusOK:
+		return "OK"
+	case StatusOperationFailed:
+		return "Operation failed"
+	default:
+		return "Unknown"
+	}
+}
+
+func (s Status) Detail() string {
+	switch s {
+	case StatusDisabled:
+		return "module is disabled"
+	case StatusNoHW:
+		return "serial port unavailable or module did not respond"
+	case StatusNoCard:
+		return "sim card not inserted"
+	case StatusNoSignal:
+		return "signal is too weak"
+	case StatusDialFail:
+		return "dial failed"
+	case StatusBusy:
+		return "module busy"
+	case StatusOK:
+		return "module is ready"
+	case StatusOperationFailed:
+		return "AT operation failed"
+	default:
+		return "unknown module status"
+	}
+}
+
+type Transport interface {
+	Do(ctx context.Context, cmd string) (at.Reply, error)
+	WaitPrompt(ctx context.Context, cmd string) error
+	SendRaw(ctx context.Context, data []byte) (at.Reply, error)
+}
+
+type Reopener interface {
+	Reopen(ctx context.Context) error
+}
+
+type Controller interface {
+	Status(ctx context.Context) (StatusResult, error)
+	SetEnabled(ctx context.Context, enabled bool) (StatusResult, error)
+	SendSMS(ctx context.Context, number, message string) (SendResult, error)
+	SendVoice(ctx context.Context, number, message string) (StatusResult, error)
+	Redial(ctx context.Context) error
+	Reinitialize(ctx context.Context) error
+}
+
+type StatusResult struct {
+	Status    Status
+	Enabled   bool
+	Detail    string
+	RSSI      int
+	BER       int
+	HWType    string
+	Firmware  string
+	CheckedAt time.Time
+}
+
+type SendResult struct {
+	Status   Status
+	Detail   string
+	Segments int
+}
+
+type Config struct {
+	APN          string
+	BaudRate     int
+	ModuleType   string
+	VersionFile  string
+	Logger       *slog.Logger
+	PollInterval time.Duration
+	BusyInterval time.Duration
+}
+
+var (
+	ErrVoiceUnsupported = errors.New("voice is unsupported for this module")
+	ErrOperationFailed  = errors.New("AT operation failed")
+)
+
+type ValidationError struct {
+	Field  string
+	Reason string
+}
+
+func (e *ValidationError) Error() string {
+	return fmt.Sprintf("invalid %s: %s", e.Field, e.Reason)
+}
+
+type controller struct {
+	transport Transport
+	reopener  Reopener
+	cfg       Config
+	logger    *slog.Logger
+
+	opMu chan struct{}
+
+	mu                 sync.Mutex
+	enabled            bool
+	hwType             string
+	firmware           string
+	detectionAttempted bool
+	lastStatus         StatusResult
+}
+
+var (
+	csqPattern   = regexp.MustCompile(`(?i)\+CSQ:\s*(\d+)\s*,\s*(\d+)`)
+	cpinPattern  = regexp.MustCompile(`(?i)^\+CPIN:\s*READY\s*$`)
+	cpasPattern  = regexp.MustCompile(`(?i)\+CPAS:\s*(\d+)`)
+	qwttsPattern = regexp.MustCompile(`(?i)\+QWTTS:\s*0(?:\s|$)`)
+)
+
+func NewController(transport Transport, reopener Reopener, cfg Config) Controller {
+	if cfg.Logger == nil {
+		cfg.Logger = slog.Default()
+	}
+	if cfg.PollInterval <= 0 {
+		cfg.PollInterval = time.Second
+	}
+	if cfg.BusyInterval <= 0 {
+		cfg.BusyInterval = time.Second
+	}
+	c := &controller{
+		transport: transport,
+		reopener:  reopener,
+		cfg:       cfg,
+		logger:    cfg.Logger,
+		opMu:      make(chan struct{}, 1),
+		enabled:   true,
+		lastStatus: StatusResult{
+			Status:    StatusOK,
+			Enabled:   true,
+			Detail:    StatusOK.Detail(),
+			RSSI:      -1,
+			BER:       -1,
+			CheckedAt: time.Now(),
+		},
+	}
+	c.hwType, c.firmware = c.configuredIdentity()
+	c.lastStatus.HWType = c.hwType
+	c.lastStatus.Firmware = c.firmware
+	return c
+}
+
+func (c *controller) Status(ctx context.Context) (StatusResult, error) {
+	if err := c.acquire(ctx); err != nil {
+		return StatusResult{Status: StatusOperationFailed, Enabled: c.isEnabled(), HWType: c.moduleType(), Detail: "request canceled"}, err
+	}
+	defer c.release()
+	return c.statusLocked(ctx)
+}
+
+func (c *controller) SetEnabled(ctx context.Context, enabled bool) (StatusResult, error) {
+	if err := c.acquire(ctx); err != nil {
+		return c.currentResult(StatusOperationFailed, "request canceled"), err
+	}
+	defer c.release()
+
+	c.mu.Lock()
+	already := c.enabled == enabled
+	c.enabled = enabled
+	c.lastStatus.Enabled = enabled
+	result := c.lastStatus
+	c.mu.Unlock()
+	if already {
+		result.CheckedAt = time.Now()
+		return result, nil
+	}
+
+	if err := c.resetLocked(ctx); err != nil {
+		result = c.currentResult(StatusOperationFailed, err.Error())
+		c.cacheStatus(result)
+		return result, nil
+	}
+	if enabled {
+		_ = c.redialLocked(ctx, true)
+	} else {
+		_ = c.redialLocked(ctx, false)
+	}
+	if ctx.Err() != nil {
+		return c.currentResult(StatusOperationFailed, "request canceled"), ctx.Err()
+	}
+	result, err := c.statusLocked(ctx)
+	if err != nil {
+		return result, err
+	}
+	return result, nil
+}
+
+func (c *controller) Redial(ctx context.Context) error {
+	if err := c.acquire(ctx); err != nil {
+		return err
+	}
+	defer c.release()
+	return c.redialLocked(ctx, true)
+}
+
+func (c *controller) Reinitialize(ctx context.Context) error {
+	if err := c.acquire(ctx); err != nil {
+		return err
+	}
+	defer c.release()
+	c.refreshConfiguredIdentity()
+	c.mu.Lock()
+	c.detectionAttempted = false
+	c.mu.Unlock()
+	if c.reopener == nil {
+		return errors.New("serial reopen is not configured")
+	}
+	return c.reopener.Reopen(ctx)
+}
+
+func (c *controller) statusLocked(ctx context.Context) (StatusResult, error) {
+	hwType, firmware := c.identity()
+	result := StatusResult{
+		Status:    StatusOK,
+		Enabled:   c.isEnabled(),
+		RSSI:      -1,
+		BER:       -1,
+		HWType:    hwType,
+		Firmware:  firmware,
+		CheckedAt: time.Now(),
+	}
+	if !result.Enabled {
+		result.Status = StatusDisabled
+		result.Detail = StatusDisabled.Detail()
+		c.cacheStatus(result)
+		return result, nil
+	}
+
+	if _, err := c.command(ctx, "AT", 3*time.Second); err != nil {
+		if isContextError(err) {
+			return result, err
+		}
+		result.Status = StatusNoHW
+		result.Detail = StatusNoHW.Detail()
+		c.cacheStatus(result)
+		return result, nil
+	}
+	c.detectFromATLocked(ctx)
+	result.HWType, result.Firmware = c.identity()
+
+	cpin, err := c.command(ctx, "AT+CPIN?", 3*time.Second)
+	if err != nil || !cpinReady(cpin.Lines) {
+		if isContextError(err) {
+			return result, err
+		}
+		result.Status = StatusNoCard
+		result.Detail = StatusNoCard.Detail()
+		c.cacheStatus(result)
+		return result, nil
+	}
+
+	csq, err := c.command(ctx, "AT+CSQ", 3*time.Second)
+	if err != nil {
+		if isContextError(err) {
+			return result, err
+		}
+		c.logger.Warn("AT+CSQ failed; continuing status check", "error", err)
+	} else if match := csqPattern.FindStringSubmatch(strings.Join(csq.Lines, "\n")); len(match) == 3 {
+		rssi, _ := strconv.Atoi(match[1])
+		ber, _ := strconv.Atoi(match[2])
+		result.RSSI = rssi
+		result.BER = ber
+		if rssi <= 16 || rssi == 99 {
+			result.Status = StatusNoSignal
+			result.Detail = StatusNoSignal.Detail()
+			c.cacheStatus(result)
+			return result, nil
+		}
+		c.logger.Debug("signal quality", "rssi", rssi, "ber", ber)
+	} else {
+		c.logger.Warn("AT+CSQ reply could not be parsed; continuing status check", "raw", csq.Raw)
+	}
+
+	result.Status = StatusOK
+	result.Detail = StatusOK.Detail()
+	c.cacheStatus(result)
+	return result, nil
+}
+
+func (c *controller) resetLocked(ctx context.Context) error {
+	profile := c.profile()
+	moduleReset := false
+	for _, command := range profile.ResetCommands {
+		reply, err := c.command(ctx, command, 3*time.Second)
+		if err == nil && reply.OK() {
+			moduleReset = true
+			c.logger.Info("module reset command accepted", "command", command, "module", profile.Type)
+			break
+		}
+		if isContextError(err) {
+			return err
+		}
+		c.logger.Warn("module reset command failed; trying next fallback", "command", command, "error", err, "raw", reply.Raw)
+	}
+	if moduleReset {
+		if c.reopener == nil {
+			return errors.New("serial reopen is not configured")
+		}
+		waitCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+		err := c.reopener.Reopen(waitCtx)
+		cancel()
+		if err != nil {
+			return fmt.Errorf("wait for module recovery: %w", err)
+		}
+	} else {
+		c.logger.Warn("all module reset commands failed; continuing best-effort reinitialization", "module", profile.Type)
+	}
+
+	commands := []string{
+		"ATE0",
+		fmt.Sprintf(`AT+cgdcont=1,"IP","%s"`, c.cfg.APN),
+	}
+	commands = append(commands, profile.ExtraResetCommands...)
+	commands = append(commands, fmt.Sprintf("AT+ipr=%d", c.cfg.BaudRate))
+	for _, command := range commands {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if _, err := c.command(ctx, command, 3*time.Second); err != nil {
+			c.logger.Warn("best-effort reset command failed", "command", command, "error", err)
+		}
+	}
+	return nil
+}
+
+func (c *controller) redialLocked(ctx context.Context, enabled bool) error {
+	profile := c.profile()
+	commands := []string{profile.DataDownCommand}
+	if enabled && profile.DataUpCommand != "" {
+		commands = append(commands, profile.DataUpCommand)
+	}
+	var firstErr error
+	for _, command := range commands {
+		if command == "" {
+			continue
+		}
+		if _, err := c.command(ctx, command, 3*time.Second); err != nil {
+			if isContextError(err) {
+				return err
+			}
+			c.logger.Warn("best-effort redial command failed", "command", command, "module", profile.Type, "error", err)
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+	return firstErr
+}
+func (c *controller) checkBusyLocked(ctx context.Context) (bool, error) {
+	if !c.profile().BusyCheck {
+		return false, nil
+	}
+	busy := false
+	for attempt := 0; attempt < 2; attempt++ {
+		reply, err := c.command(ctx, "AT+CPAS", 3*time.Second)
+		if err != nil {
+			if isContextError(err) {
+				return false, err
+			}
+			return false, fmt.Errorf("%w: AT+CPAS: %v", ErrOperationFailed, err)
+		}
+		match := cpasPattern.FindStringSubmatch(strings.Join(reply.Lines, "\n"))
+		if len(match) != 2 {
+			return false, fmt.Errorf("%w: cannot parse AT+CPAS reply", ErrOperationFailed)
+		}
+		state, _ := strconv.Atoi(match[1])
+		if state != 0 {
+			busy = true
+		}
+		if attempt == 0 {
+			if err := wait(ctx, c.cfg.BusyInterval); err != nil {
+				return false, err
+			}
+		}
+	}
+	return busy, nil
+}
+
+func (c *controller) command(ctx context.Context, cmd string, timeout time.Duration) (at.Reply, error) {
+	commandCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	return c.transport.Do(commandCtx, cmd)
+}
+
+func (c *controller) acquire(ctx context.Context) error {
+	select {
+	case c.opMu <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (c *controller) release() {
+	<-c.opMu
+}
+
+func (c *controller) configuredIdentity() (string, string) {
+	moduleType, firmware := normalizeSelection(c.cfg.ModuleType)
+	content, err := os.ReadFile(c.cfg.VersionFile)
+	if err != nil {
+		if moduleType == "unknown" {
+			c.logger.Warn("cannot read module version file; module identity will be probed through ATI", "path", c.cfg.VersionFile, "error", err)
+		}
+		return moduleType, firmware
+	}
+	detectedType, detectedFirmware, ok := identifyModule(string(content))
+	if !ok {
+		c.logger.Warn("module version file is not recognized; module identity will be probed through ATI", "path", c.cfg.VersionFile)
+		return moduleType, firmware
+	}
+	if moduleType == "unknown" {
+		return detectedType, detectedFirmware
+	}
+	if detectedType == moduleType && firmware == FirmwareUnknown && detectedFirmware != FirmwareUnknown {
+		firmware = detectedFirmware
+	}
+	return moduleType, firmware
+}
+
+func (c *controller) refreshConfiguredIdentity() {
+	moduleType, firmware := c.configuredIdentity()
+	c.mu.Lock()
+	c.hwType = moduleType
+	c.firmware = firmware
+	c.lastStatus.HWType = moduleType
+	c.lastStatus.Firmware = firmware
+	c.mu.Unlock()
+}
+
+func (c *controller) identity() (string, string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.hwType, c.firmware
+}
+
+func (c *controller) profile() moduleProfile {
+	moduleType, firmware := c.identity()
+	return profileFor(moduleType, firmware)
+}
+
+func (c *controller) needsDetection() bool {
+	c.mu.Lock()
+	if c.detectionAttempted {
+		c.mu.Unlock()
+		return false
+	}
+	moduleType := c.hwType
+	firmware := c.firmware
+	c.mu.Unlock()
+
+	if moduleType == "unknown" {
+		return true
+	}
+	if (moduleType == ModuleEM05CN || moduleType == ModuleFibocom) && firmware == FirmwareUnknown {
+		return true
+	}
+	return false
+}
+
+func (c *controller) detectFromATLocked(ctx context.Context) {
+	if !c.needsDetection() {
+		return
+	}
+	var identityText strings.Builder
+	receivedIdentityReply := false
+	for _, command := range []string{"ATI", "AT+CGMM", "AT+CGMR"} {
+		reply, err := c.command(ctx, command, 3*time.Second)
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			c.logger.Debug("module identity command failed", "command", command, "error", err)
+			continue
+		}
+		receivedIdentityReply = true
+		identityText.WriteString(reply.Raw)
+		identityText.WriteByte('\n')
+		identityText.WriteString(strings.Join(reply.Lines, "\n"))
+		identityText.WriteByte('\n')
+	}
+	if !receivedIdentityReply {
+		return
+	}
+	c.mu.Lock()
+	c.detectionAttempted = true
+	c.mu.Unlock()
+	detectedType, detectedFirmware, ok := identifyModule(identityText.String())
+	if !ok {
+		c.logger.Warn("module identity could not be determined from ATI/AT+CGMM/AT+CGMR", "raw", identityText.String())
+		return
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.hwType == "unknown" {
+		c.hwType = detectedType
+		c.firmware = detectedFirmware
+	} else if c.hwType == detectedType && c.firmware == FirmwareUnknown && detectedFirmware != FirmwareUnknown {
+		c.firmware = detectedFirmware
+	}
+	c.lastStatus.HWType = c.hwType
+	c.lastStatus.Firmware = c.firmware
+}
+
+func (c *controller) isEnabled() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.enabled
+}
+
+func (c *controller) moduleType() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.hwType
+}
+
+func (c *controller) cacheStatus(result StatusResult) {
+	c.mu.Lock()
+	c.lastStatus = result
+	c.mu.Unlock()
+}
+
+func (c *controller) currentResult(status Status, detail string) StatusResult {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return StatusResult{
+		Status:    status,
+		Enabled:   c.enabled,
+		Detail:    detail,
+		RSSI:      c.lastStatus.RSSI,
+		BER:       c.lastStatus.BER,
+		HWType:    c.hwType,
+		Firmware:  c.firmware,
+		CheckedAt: time.Now(),
+	}
+}
+
+func cpinReady(lines []string) bool {
+	for _, line := range lines {
+		if cpinPattern.MatchString(strings.TrimSpace(line)) {
+			return true
+		}
+	}
+	return false
+}
+
+func isContextError(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
+
+func wait(ctx context.Context, duration time.Duration) error {
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}

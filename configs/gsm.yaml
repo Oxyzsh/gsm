@@ -1,0 +1,24 @@
+serial:
+  device: /dev/ttyUSB2
+  baud_rate: 115200
+
+module:
+  # auto | em05-ce | em05-cn | em05-cn-a03 | em05-cn-a04 | fibocom-l610
+  type: auto
+  version_file: /etc/mmdc/4g_version
+
+apn: cmnet
+
+keepalive:
+  enabled: true
+  check_interval: 300s
+  retry_interval: 10s
+  redial_threshold: 5
+  reset_threshold: 10
+
+grpc:
+  listen: 127.0.0.1:50051
+
+log:
+  level: info
+  format: text

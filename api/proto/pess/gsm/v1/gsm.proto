@@ -1,0 +1,84 @@
+syntax = "proto3";
+
+package pess.gsm.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "go-pess/platform/user/pess/gsm/api/gen/pess/gsm/v1;gsmv1";
+
+// GsmStatus 表示 4G 模块的可用状态。
+enum GsmStatus {
+  GSM_STATUS_UNSPECIFIED = 0;
+  GSM_STATUS_OK = 1;
+  GSM_STATUS_DISABLED = 2;          // 被主动禁用
+  GSM_STATUS_NO_HW = 3;             // 硬件不存在或串口不可用
+  GSM_STATUS_NO_CARD = 4;           // SIM 卡未插入
+  GSM_STATUS_NO_SIGNAL = 5;         // 无信号
+  GSM_STATUS_DIAL_FAIL = 6;         // 拨号失败（当前状态检测不产生，保留）
+  GSM_STATUS_BUSY = 7;              // 模块忙
+  GSM_STATUS_OPERATION_FAILED = 8;  // 短信/语音 AT 流程失败
+}
+
+message GetStatusRequest {}
+
+message GetStatusResponse {
+  GsmStatus status = 1;
+  bool enabled = 2;
+  int32 rssi = 3;
+  int32 ber = 4;
+  string hw_type = 5;
+  string detail = 6;
+  google.protobuf.Timestamp checked_at = 7;
+  string firmware = 8;     // A03/A04/L610; empty or unknown when unavailable
+}
+
+message SetEnabledRequest {
+  bool enabled = 1;
+}
+
+message SetEnabledResponse {
+  GsmStatus status = 1;
+  string detail = 2;
+}
+
+message SendSMSRequest {
+  string phone_number = 1;
+  string message = 2;
+}
+
+message SendSMSResponse {
+  GsmStatus status = 1;
+  string detail = 2;
+  int32 segments = 3;
+}
+
+message SendVoiceRequest {
+  string phone_number = 1;
+  string message = 2;
+}
+
+message SendVoiceResponse {
+  GsmStatus status = 1;
+  string detail = 2;
+}
+
+message SetLogLevelRequest {
+  enum Level {
+    LEVEL_UNSPECIFIED = 0;
+    LEVEL_DEBUG = 1;
+    LEVEL_INFO = 2;
+    LEVEL_WARN = 3;
+    LEVEL_ERROR = 4;
+  }
+  Level level = 1;
+}
+
+message SetLogLevelResponse {}
+
+service GsmService {
+  rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
+  rpc SetEnabled(SetEnabledRequest) returns (SetEnabledResponse);
+  rpc SendSMS(SendSMSRequest) returns (SendSMSResponse);
+  rpc SendVoice(SendVoiceRequest) returns (SendVoiceResponse);
+  rpc SetLogLevel(SetLogLevelRequest) returns (SetLogLevelResponse);
+}
