@@ -18,6 +18,9 @@ type moduleProfile struct {
 	Firmware           string
 	SupportsVoice      bool
 	BusyCheck          bool
+	// TTSSetup 表示模块支持 AT+QTTSETUP 查询/切换语音合成语言库；
+	// 只有移远 EM05 系列有这条命令，广和通不发。
+	TTSSetup           bool
 	ResetCommands      []string
 	ExtraResetCommands []string
 	DataDownCommand    string
@@ -33,6 +36,7 @@ func profileFor(moduleType, firmware string) moduleProfile {
 			Firmware:           normalizeFirmware(firmware),
 			SupportsVoice:      true,
 			BusyCheck:          true,
+			TTSSetup:           true,
 			ResetCommands:      []string{"AT^reset", "AT+CFUN=1,1"},
 			ExtraResetCommands: []string{"AT+qnetdevctl=1,1,1"},
 			DataDownCommand:    "AT+cgact=0,1",

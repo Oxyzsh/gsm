@@ -49,6 +49,11 @@ type SerialConfig struct {
 type ModuleConfig struct {
 	Type        string `yaml:"type"`
 	VersionFile string `yaml:"version_file"`
+	// DataMode 决定数据链路由谁拨：
+	//   auto     —— 读 AT+QCFG="usbnet"，QMI(0) 视为外部拨号工具负责，其余走 AT 上下行；
+	//   at       —— 强制由告警服务用 AT+cgact 之类命令做数据上下行；
+	//   external —— 强制外部拨号工具（如 quectel-CM）负责，本服务不发任何拨号命令。
+	DataMode string `yaml:"data_mode"`
 }
 
 type KeepaliveConfig struct {
@@ -71,7 +76,7 @@ type LogConfig struct {
 func Default() Config {
 	return Config{
 		Serial: SerialConfig{BaudRate: 115200},
-		Module: ModuleConfig{Type: "auto", VersionFile: "/etc/mmdc/4g_version"},
+		Module: ModuleConfig{Type: "auto", VersionFile: "/etc/mmdc/4g_version", DataMode: "auto"},
 		Keepalive: KeepaliveConfig{
 			Enabled:         true,
 			CheckInterval:   Duration(300 * time.Second),
@@ -124,6 +129,11 @@ func (c Config) Validate() error {
 	}
 	if strings.EqualFold(c.Module.Type, "auto") && strings.TrimSpace(c.Module.VersionFile) == "" {
 		return errors.New("module.version_file is required when module.type is auto")
+	}
+	switch strings.ToLower(strings.TrimSpace(c.Module.DataMode)) {
+	case "auto", "at", "external":
+	default:
+		return fmt.Errorf("module.data_mode %q must be auto, at, or external", c.Module.DataMode)
 	}
 	if strings.TrimSpace(c.APN) == "" {
 		return errors.New("apn is required")

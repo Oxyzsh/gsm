@@ -71,8 +71,31 @@ func Open(cfg Config) (*Session, error) {
 		if err != nil {
 			return nil, err
 		}
-		return port, nil
+		release, err := lockDevice(cfg.Device)
+		if err != nil {
+			_ = port.Close()
+			return nil, err
+		}
+		return &lockedPort{Port: port, release: release}, nil
 	}), nil
+}
+
+// lockedPort 在串口句柄之外持有设备锁，Close 时一起释放。
+// 串口断开重连会重新走 opener，因此锁的生命周期与一次连接一致。
+type lockedPort struct {
+	Port
+	release func() error
+	once    sync.Once
+}
+
+func (p *lockedPort) Close() error {
+	err := p.Port.Close()
+	p.once.Do(func() {
+		if releaseErr := p.release(); releaseErr != nil && err == nil {
+			err = releaseErr
+		}
+	})
+	return err
 }
 
 func New(cfg Config, opener Opener) *Session {

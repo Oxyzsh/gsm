@@ -88,6 +88,7 @@ func run() int {
 		BaudRate:    cfg.Serial.BaudRate,
 		ModuleType:  cfg.Module.Type,
 		VersionFile: cfg.Module.VersionFile,
+		DataMode:    cfg.Module.DataMode,
 		Logger:      logger,
 	})
 	service := api.New(controller, level)

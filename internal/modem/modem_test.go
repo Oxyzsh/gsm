@@ -506,3 +506,107 @@ func TestFibocomSMSSkipsQuectelStorageCommand(t *testing.T) {
 		}
 	}
 }
+
+// usbnetTransport 模拟模块对 AT+QCFG="usbnet" 的应答，其余命令一律 OK。
+func usbnetTransport(usbnet string) *fakeTransport {
+	return &fakeTransport{do: func(cmd string) (at.Reply, error) {
+		if strings.EqualFold(strings.TrimSpace(cmd), `AT+QCFG="usbnet"`) {
+			return okReply(`+QCFG: "usbnet",` + usbnet), nil
+		}
+		return okReply(), nil
+	}}
+}
+
+func TestExternalDataModeSkipsATDialCommands(t *testing.T) {
+	transport := &fakeTransport{}
+	controller := NewController(transport, &fakeReopener{}, Config{
+		APN: "cmnet", BaudRate: 115200, ModuleType: "em05-ce", DataMode: "external",
+		PollInterval: time.Millisecond, BusyInterval: time.Millisecond,
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if _, err := controller.SetEnabled(context.Background(), false); err != nil {
+		t.Fatal(err)
+	}
+	for _, command := range []string{"AT+cgact=0,1", "AT+qnetdevctl=1,1,1"} {
+		if transport.hasCall(command) {
+			t.Fatalf("external data mode must not send %q: %v", command, transport.doCalls)
+		}
+	}
+}
+
+func TestAutoDataModeDetectsQMIAndSkipsDial(t *testing.T) {
+	transport := usbnetTransport("0")
+	controller := NewController(transport, nil, Config{
+		APN: "cmnet", BaudRate: 115200, ModuleType: "em05-ce", DataMode: "auto",
+		PollInterval: time.Millisecond, BusyInterval: time.Millisecond,
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if _, err := controller.Status(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !transport.hasCall(`AT+QCFG="usbnet"`) {
+		t.Fatalf("data mode was not probed: %v", transport.doCalls)
+	}
+	if err := controller.Redial(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, command := range []string{"AT+cgact=0,1", "AT+cgact=1,1"} {
+		if transport.hasCall(command) {
+			t.Fatalf("QMI mode must not send AT data commands, got %q in %v", command, transport.doCalls)
+		}
+	}
+}
+
+func TestAutoDataModeKeepsATDialWhenNotQMI(t *testing.T) {
+	transport := usbnetTransport("1")
+	controller := NewController(transport, nil, Config{
+		APN: "cmnet", BaudRate: 115200, ModuleType: "em05-ce", DataMode: "auto",
+		PollInterval: time.Millisecond, BusyInterval: time.Millisecond,
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if _, err := controller.Status(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := controller.Redial(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !transport.hasCall("AT+cgact=1,1") {
+		t.Fatalf("ECM mode should keep AT data dialing: %v", transport.doCalls)
+	}
+}
+
+func ttsTransport(currentLibrary string) *fakeTransport {
+	return &fakeTransport{do: func(cmd string) (at.Reply, error) {
+		switch strings.ToUpper(strings.TrimSpace(cmd)) {
+		case "AT+CPIN?":
+			return okReply("+CPIN: READY"), nil
+		case "AT+CSQ":
+			return okReply("+CSQ: 22,99"), nil
+		case "AT+QTTSETUP=2,3":
+			return okReply("+QTTSETUP: 2,3," + currentLibrary), nil
+		}
+		return okReply(), nil
+	}}
+}
+
+func TestTTSLibrarySwitchedWhenNotChinese(t *testing.T) {
+	transport := ttsTransport("1")
+	controller := newTestController(t, transport, nil)
+	if _, err := controller.Status(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !transport.hasCall("AT+QTTSETUP=1,3,0") {
+		t.Fatalf("english TTS library was not switched to chinese: %v", transport.doCalls)
+	}
+}
+
+func TestTTSLibraryChineseNotTouched(t *testing.T) {
+	transport := ttsTransport("0")
+	controller := newTestController(t, transport, nil)
+	if _, err := controller.Status(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if transport.hasCall("AT+QTTSETUP=1,3,0") {
+		t.Fatalf("chinese TTS library must not be reconfigured: %v", transport.doCalls)
+	}
+}

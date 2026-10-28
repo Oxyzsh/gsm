@@ -98,3 +98,26 @@ func TestModuleTypeAliases(t *testing.T) {
 		}
 	}
 }
+
+func TestDataModeDefaultsAndValidation(t *testing.T) {
+	if got := Default().Module.DataMode; got != "auto" {
+		t.Fatalf("default module.data_mode = %q, want auto", got)
+	}
+	for _, mode := range []string{"auto", "at", "external", "EXTERNAL"} {
+		cfg := Default()
+		cfg.Serial.Device = "/dev/ttyUSB2"
+		cfg.APN = "cmnet"
+		cfg.Module.DataMode = mode
+		if err := cfg.Validate(); err != nil {
+			t.Fatalf("module.data_mode %q rejected: %v", mode, err)
+		}
+	}
+	cfg := Default()
+	cfg.Serial.Device = "/dev/ttyUSB2"
+	cfg.APN = "cmnet"
+	cfg.Module.DataMode = "qmi"
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("unknown module.data_mode should be rejected")
+	}
+}
+

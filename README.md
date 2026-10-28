@@ -16,6 +16,20 @@ PESS 4G 模块管理服务（Go 实现），对应设计基线 [docs/gsm-go-dev.
 
 第三方 gRPC 接入见 [docs/integration.md](docs/integration.md)。
 
+## 与现场其它组件的边界
+
+部署前必须确认这三件事，否则会和现场已有服务互相踩：
+
+1. **AT 口只能有一个持有者。** 本服务独占 `/dev/ttyUSB2`（Linux 上用 flock 跨进程互斥）。
+   现场若还有其它脚本开机抢这个口（典型是厂商的 `4G-info-get.service` / `get_4g_version.sh`，
+   它会 `cat /dev/ttyUSB2` 并发 `AT+QTTSEtup`），必须先停用它：
+   `systemctl disable --now 4G-info-get.service`，版本号由本服务通过 `ATI` 自行探测。
+2. **数据拨号不归本服务。** QMI 模式（`AT+QCFG="usbnet"` 为 0）下拨号由 `quectel-CM`
+   （现场 `quectel-cm.service`）负责；本服务只做模块状态、短信、语音和模块控制。
+   `module.data_mode=auto` 会自动识别，也可显式写 `external`/`at`。
+3. **中文语音库。** 语音播报依赖模块的中文 TTS 库，本服务启动后会用 `AT+QTTSETUP=2,3`
+   自检，发现是英文库会切到中文库并提示需要复位一次才生效。
+
 ## 构建与测试
 
 ```bash
@@ -30,11 +44,11 @@ make build
 CGO_ENABLED=1 go test -race ./...
 ```
 
-交叉编译：
+交叉编译（现场是 aarch64，直接生成静态包，无需板上装 Go）：
 
 ```bash
+make build-linux ARCH=arm64     # 产物 bin/gsmd-linux-arm64
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o bin/gsmd-amd64 ./cmd/gsmd
-GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -o bin/gsmd-arm64 ./cmd/gsmd
 ```
 
 生成 gRPC 代码需要 `protoc`、`protoc-gen-go`、`protoc-gen-go-grpc`。当前产物由 protoc 29.3、protoc-gen-go 1.34.2、protoc-gen-go-grpc 1.5.1 生成：
@@ -67,7 +81,20 @@ sudo systemctl enable --now gsmd
 journalctl -u gsmd -f
 ```
 
-生产配置位于 `/etc/gsm/gsm.yaml`。串口设备、APN 和模块类型需按现场调整。非回环监听会记录安全告警，且该服务本身不提供 TLS 或鉴权。
+生产配置位于 `/etc/gsm/gsm.yaml`。串口设备、APN 和模块类型需按现场调整。`make install` 只在
+`/etc/gsm/gsm.yaml` 不存在时写入，升级不会覆盖现场配置。非回环监听会记录安全告警，且该服务本身不提供 TLS 或鉴权。
+
+首次部署顺序：
+
+```bash
+sudo useradd -r -s /usr/sbin/nologin -G dialout gsmd || true
+sudo systemctl disable --now 4G-info-get.service     # 停掉抢 AT 口的厂商脚本
+sudo make install ARCH=arm64
+sudo systemctl daemon-reload
+sudo systemctl enable --now gsmd
+journalctl -u gsmd -f
+```
+
 
 ## 验收说明
 

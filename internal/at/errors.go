@@ -6,9 +6,10 @@ import (
 )
 
 var (
-	ErrTimeout  = errors.New("AT command timeout")
-	ErrPortDown = errors.New("serial port is down")
-	ErrClosed   = errors.New("AT session is closed")
+	ErrTimeout     = errors.New("AT command timeout")
+	ErrPortDown    = errors.New("serial port is down")
+	ErrClosed      = errors.New("AT session is closed")
+	ErrDeviceBusy  = errors.New("AT device is held by another process")
 )
 
 type TerminalError struct {

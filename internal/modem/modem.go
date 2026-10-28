@@ -115,6 +115,9 @@ type Config struct {
 	BaudRate     int
 	ModuleType   string
 	VersionFile  string
+	// DataMode 是 module.data_mode 的取值：auto / at / external。
+	// auto 时按 AT+QCFG="usbnet" 判断数据面模式，QMI(0) 交给外部拨号工具。
+	DataMode     string
 	Logger       *slog.Logger
 	PollInterval time.Duration
 	BusyInterval time.Duration
@@ -147,6 +150,8 @@ type controller struct {
 	hwType             string
 	firmware           string
 	detectionAttempted bool
+	dataMode           string // "" 未判定；"at" 本服务拨；"external" 外部工具拨
+	ttsChecked         bool
 	lastStatus         StatusResult
 }
 
@@ -155,6 +160,12 @@ var (
 	cpinPattern  = regexp.MustCompile(`(?i)^\+CPIN:\s*READY\s*$`)
 	cpasPattern  = regexp.MustCompile(`(?i)\+CPAS:\s*(\d+)`)
 	qwttsPattern = regexp.MustCompile(`(?i)\+QWTTS:\s*0(?:\s|$)`)
+
+	// qcfgUsbnetPattern 解析 AT+QCFG="usbnet" 的数据面模式：
+	// 0=QMI（数据由 QMI 拨号工具负责）、1=ECM、2=MBIM、3=RNDIS。
+	qcfgUsbnetPattern = regexp.MustCompile(`(?i)\+QCFG:\s*"usbnet"\s*,\s*(\d+)`)
+	// qttsetupPattern 解析 +QTTSETUP: 2,3,<n>，<n>=0 表示当前为中文语音库。
+	qttsetupPattern = regexp.MustCompile(`(?i)\+QTTSETUP:\s*\d+\s*,\s*\d+\s*,\s*(-?\d+)`)
 )
 
 func NewController(transport Transport, reopener Reopener, cfg Config) Controller {
@@ -203,6 +214,9 @@ func (c *controller) SetEnabled(ctx context.Context, enabled bool) (StatusResult
 	}
 	defer c.release()
 
+	// 先判定数据面归属，避免在 QMI 模式下把 AT 拨号命令发出去。
+	c.resolveDataModeLocked(ctx)
+
 	c.mu.Lock()
 	already := c.enabled == enabled
 	c.enabled = enabled
@@ -239,6 +253,7 @@ func (c *controller) Redial(ctx context.Context) error {
 		return err
 	}
 	defer c.release()
+	c.resolveDataModeLocked(ctx)
 	return c.redialLocked(ctx, true)
 }
 
@@ -286,6 +301,7 @@ func (c *controller) statusLocked(ctx context.Context) (StatusResult, error) {
 	}
 	c.detectFromATLocked(ctx)
 	result.HWType, result.Firmware = c.identity()
+	c.resolveDataModeLocked(ctx)
 
 	cpin, err := c.command(ctx, "AT+CPIN?", 3*time.Second)
 	if err != nil || !cpinReady(cpin.Lines) {
@@ -297,6 +313,8 @@ func (c *controller) statusLocked(ctx context.Context) (StatusResult, error) {
 		c.cacheStatus(result)
 		return result, nil
 	}
+
+	c.ensureTTSLocked(ctx)
 
 	csq, err := c.command(ctx, "AT+CSQ", 3*time.Second)
 	if err != nil {
@@ -359,7 +377,9 @@ func (c *controller) resetLocked(ctx context.Context) error {
 		"ATE0",
 		fmt.Sprintf(`AT+cgdcont=1,"IP","%s"`, c.cfg.APN),
 	}
-	commands = append(commands, profile.ExtraResetCommands...)
+	if !c.dataDialingExternal() {
+		commands = append(commands, profile.ExtraResetCommands...)
+	}
 	commands = append(commands, fmt.Sprintf("AT+ipr=%d", c.cfg.BaudRate))
 	for _, command := range commands {
 		if ctx.Err() != nil {
@@ -373,6 +393,10 @@ func (c *controller) resetLocked(ctx context.Context) error {
 }
 
 func (c *controller) redialLocked(ctx context.Context, enabled bool) error {
+	if c.dataDialingExternal() {
+		c.logger.Info("data dialing is delegated to the external dialer; skip AT data commands", "enabled", enabled)
+		return nil
+	}
 	profile := c.profile()
 	commands := []string{profile.DataDownCommand}
 	if enabled && profile.DataUpCommand != "" {
@@ -395,6 +419,110 @@ func (c *controller) redialLocked(ctx context.Context, enabled bool) error {
 	}
 	return firstErr
 }
+// dataDialingExternal 报告数据链路是否由外部拨号工具负责（QMI 模式）。
+// 该判断决定 SetEnabled/保活重拨要不要发 AT 拨号命令：QMI 模式下 AT+cgact 之类
+// 不是有效路径，发了只会得到 ERROR 或被忽略，真正拨号由 quectel-CM 完成。
+func (c *controller) dataDialingExternal() bool {
+	c.mu.Lock()
+	mode := c.dataMode
+	c.mu.Unlock()
+	if mode == "" {
+		// 尚未探测时先认配置：显式 external 的部署不必等一次状态检查。
+		return strings.EqualFold(strings.TrimSpace(c.cfg.DataMode), "external")
+	}
+	return mode == "external"
+}
+
+// resolveDataModeLocked 在首次状态检查时判定数据面由谁拨号，判定结果缓存。
+func (c *controller) resolveDataModeLocked(ctx context.Context) {
+	c.mu.Lock()
+	resolved := c.dataMode
+	c.mu.Unlock()
+	if resolved != "" {
+		return
+	}
+	mode := strings.ToLower(strings.TrimSpace(c.cfg.DataMode))
+	if mode == "" {
+		mode = "auto"
+	}
+	if mode == "at" || mode == "external" {
+		c.setDataMode(mode, "configured by module.data_mode")
+		return
+	}
+	// auto：只有移远 EM05 系列用 AT+QCFG="usbnet" 表达数据面模式。
+	if moduleType := c.moduleType(); moduleType != ModuleEM05CE && moduleType != ModuleEM05CN {
+		c.setDataMode("at", "module has no usbnet configuration")
+		return
+	}
+	reply, err := c.command(ctx, `AT+QCFG="usbnet"`, 3*time.Second)
+	if err != nil {
+		if isContextError(err) {
+			return // 交给下一次状态检查
+		}
+		c.logger.Warn("AT+QCFG=\"usbnet\" failed; assume AT data dialing", "error", err)
+		c.setDataMode("at", "usbnet query failed")
+		return
+	}
+	match := qcfgUsbnetPattern.FindStringSubmatch(strings.Join(reply.Lines, "\n"))
+	if len(match) != 2 {
+		c.logger.Warn("AT+QCFG=\"usbnet\" reply could not be parsed; assume AT data dialing", "raw", reply.Raw)
+		c.setDataMode("at", "usbnet reply unparsable")
+		return
+	}
+	if match[1] == "0" {
+		c.setDataMode("external", `usbnet=0 (QMI): data dialing belongs to the external dialer`)
+		return
+	}
+	c.setDataMode("at", fmt.Sprintf("usbnet=%s", match[1]))
+}
+
+func (c *controller) setDataMode(mode, reason string) {
+	c.mu.Lock()
+	changed := c.dataMode != mode
+	c.dataMode = mode
+	c.mu.Unlock()
+	if changed {
+		c.logger.Info("data mode resolved", "mode", mode, "reason", reason)
+	}
+}
+
+// ensureTTSLocked 确认移远模块的中文语音库在位；不在位时切库并提示需要重启。
+// 只检查一次，避免每次状态查询都发 AT 命令。
+func (c *controller) ensureTTSLocked(ctx context.Context) {
+	c.mu.Lock()
+	checked := c.ttsChecked
+	c.mu.Unlock()
+	if checked || !c.profile().TTSSetup {
+		return
+	}
+	reply, err := c.command(ctx, "AT+QTTSETUP=2,3", 3*time.Second)
+	if err != nil {
+		if isContextError(err) {
+			return
+		}
+		c.logger.Debug("AT+QTTSETUP query failed; skip TTS library check", "error", err)
+		return
+	}
+	c.mu.Lock()
+	c.ttsChecked = true
+	c.mu.Unlock()
+	match := qttsetupPattern.FindStringSubmatch(strings.Join(reply.Lines, "\n"))
+	if len(match) != 2 {
+		c.logger.Warn("AT+QTTSETUP reply could not be parsed", "raw", reply.Raw)
+		return
+	}
+	if strings.EqualFold(strings.TrimSpace(match[1]), "0") {
+		c.logger.Debug("chinese TTS library is active")
+		return
+	}
+	c.logger.Warn("module TTS library is not chinese; switching to chinese library", "current", match[1])
+	if _, err := c.command(ctx, "AT+QTTSETUP=1,3,0", 3*time.Second); err != nil {
+		c.logger.Warn("switch to chinese TTS library failed", "error", err)
+		return
+	}
+	c.logger.Info("chinese TTS library selected; a module reset (AT+CFUN=1,1) is required before it takes effect")
+}
+
 func (c *controller) checkBusyLocked(ctx context.Context) (bool, error) {
 	if !c.profile().BusyCheck {
 		return false, nil

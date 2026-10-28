@@ -6,6 +6,11 @@ module:
   # auto | em05-ce | em05-cn | em05-cn-a03 | em05-cn-a04 | fibocom-l610
   type: auto
   version_file: /etc/mmdc/4g_version
+  # auto | at | external
+  #   auto：读 AT+QCFG="usbnet"，QMI(0) 视为外部拨号工具负责，其余走 AT 上下行
+  #   at：本服务用 AT+cgact 之类命令做数据上下行
+  #   external：数据拨号完全交给 quectel-CM，本服务不发任何拨号命令
+  data_mode: auto
 
 apn: cmnet
 
