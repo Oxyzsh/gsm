@@ -35,4 +35,5 @@ install: build-linux
 	test -f /etc/gsm/gsm.yaml || install -m0644 configs/gsm.yaml /etc/gsm/gsm.yaml
 	install -Dm0644 deploy/gsmd.service /etc/systemd/system/gsmd.service
 	@echo "提示：若还没有服务账号，先执行 useradd -r -s /usr/sbin/nologin -G dialout gsmd"
+	@echo "提示：让 gsmd 能维护版本缓存，执行 chown gsmd:gsmd /etc/mmdc/4g_version"
 	@echo "提示：install 不覆盖已存在的 /etc/gsm/gsm.yaml"

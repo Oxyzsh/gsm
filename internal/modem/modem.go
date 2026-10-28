@@ -111,10 +111,12 @@ type SendResult struct {
 }
 
 type Config struct {
-	APN          string
-	BaudRate     int
-	ModuleType   string
-	VersionFile  string
+	APN         string
+	BaudRate    int
+	ModuleType  string
+	VersionFile string
+	// VersionFileWrite 为 true 时，识别到模块后把版本号写回 VersionFile（自维护缓存）。
+	VersionFileWrite bool
 	// DataMode 是 module.data_mode 的取值：auto / at / external。
 	// auto 时按 AT+QCFG="usbnet" 判断数据面模式，QMI(0) 交给外部拨号工具。
 	DataMode     string
@@ -419,6 +421,7 @@ func (c *controller) redialLocked(ctx context.Context, enabled bool) error {
 	}
 	return firstErr
 }
+
 // dataDialingExternal 报告数据链路是否由外部拨号工具负责（QMI 模式）。
 // 该判断决定 SetEnabled/保活重拨要不要发 AT 拨号命令：QMI 模式下 AT+cgact 之类
 // 不是有效路径，发了只会得到 ERROR 或被忽略，真正拨号由 quectel-CM 完成。
@@ -626,6 +629,12 @@ func (c *controller) needsDetection() bool {
 	firmware := c.firmware
 	c.mu.Unlock()
 
+	// auto（或未配置）时永远按 AT 实测一次：版本文件只是上一次的缓存，
+	// 换过模块之后文件可能是旧的，必须以模块自己报的为准。
+	configured := strings.TrimSpace(c.cfg.ModuleType)
+	if configured == "" || strings.EqualFold(configured, "auto") {
+		return true
+	}
 	if moduleType == "unknown" {
 		return true
 	}
@@ -641,6 +650,7 @@ func (c *controller) detectFromATLocked(ctx context.Context) {
 	}
 	var identityText strings.Builder
 	receivedIdentityReply := false
+	revision := ""
 	for _, command := range []string{"ATI", "AT+CGMM", "AT+CGMR"} {
 		reply, err := c.command(ctx, command, 3*time.Second)
 		if err != nil {
@@ -655,6 +665,9 @@ func (c *controller) detectFromATLocked(ctx context.Context) {
 		identityText.WriteByte('\n')
 		identityText.WriteString(strings.Join(reply.Lines, "\n"))
 		identityText.WriteByte('\n')
+		if revision == "" {
+			revision = revisionFromReply(reply)
+		}
 	}
 	if !receivedIdentityReply {
 		return
@@ -668,16 +681,80 @@ func (c *controller) detectFromATLocked(ctx context.Context) {
 		return
 	}
 
+	c.applyDetectedIdentity(detectedType, detectedFirmware)
+	if revision != "" {
+		c.writeVersionFile(revision)
+	}
+}
+
+// applyDetectedIdentity 用 AT 实测结果修正身份。
+//
+// module.type 为 auto（或未配置）时以实测为准：版本文件里可能留着换下来的旧模块信息，
+// 只信文件会一路错下去（比如把 EM05 当成 L610，发错厂商专用命令）。
+// 显式配置了 module.type 时绝不覆盖，那是运维的强制指定。
+func (c *controller) applyDetectedIdentity(detectedType, detectedFirmware string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.hwType == "unknown" {
+	configured := strings.TrimSpace(c.cfg.ModuleType)
+	autoMode := configured == "" || strings.EqualFold(configured, "auto")
+	previousType, previousFirmware := c.hwType, c.firmware
+
+	switch {
+	case autoMode:
+		if previousType != "" && previousType != "unknown" && previousType != detectedType {
+			c.logger.Warn("module identity in version file disagrees with AT reply; trusting AT",
+				"version_file", previousType, "at_reply", detectedType)
+		}
 		c.hwType = detectedType
 		c.firmware = detectedFirmware
-	} else if c.hwType == detectedType && c.firmware == FirmwareUnknown && detectedFirmware != FirmwareUnknown {
+	case previousType == "unknown":
+		c.hwType = detectedType
+		c.firmware = detectedFirmware
+	case previousType == detectedType && previousFirmware == FirmwareUnknown && detectedFirmware != FirmwareUnknown:
 		c.firmware = detectedFirmware
 	}
 	c.lastStatus.HWType = c.hwType
 	c.lastStatus.Firmware = c.firmware
+}
+
+// revisionFromReply 从 ATI/AT+CGMR 的应答里取版本号字符串。
+func revisionFromReply(reply at.Reply) string {
+	for _, line := range reply.Lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.EqualFold(line, "OK") {
+			continue
+		}
+		if index := strings.Index(strings.ToLower(line), "revision:"); index == 0 {
+			return strings.TrimSpace(line[len("revision:"):])
+		}
+	}
+	// AT+CGMR 的应答通常只有一行裸版本号。
+	for _, line := range reply.Lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.EqualFold(line, "OK") || strings.Contains(strings.ToLower(line), "revision:") {
+			continue
+		}
+		return line
+	}
+	return ""
+}
+
+// writeVersionFile 把实测版本号写回版本文件，让厂商那个会抢 AT 口的脚本可以永久停用。
+// 写入失败只记录一次警告：文件所在目录不可写（未配 ReadWritePaths/chown）时服务照常工作。
+func (c *controller) writeVersionFile(revision string) {
+	if !c.cfg.VersionFileWrite || strings.TrimSpace(c.cfg.VersionFile) == "" {
+		return
+	}
+	current, err := os.ReadFile(c.cfg.VersionFile)
+	if err == nil && strings.TrimSpace(string(current)) == revision {
+		return
+	}
+	if err := os.WriteFile(c.cfg.VersionFile, []byte(revision+"\n"), 0o644); err != nil {
+		c.logger.Warn("cannot update module version file; module identity is still detected over AT",
+			"path", c.cfg.VersionFile, "error", err)
+		return
+	}
+	c.logger.Info("module version file updated", "path", c.cfg.VersionFile, "content", revision)
 }
 
 func (c *controller) isEnabled() bool {

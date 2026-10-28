@@ -6,6 +6,8 @@ module:
   # auto | em05-ce | em05-cn | em05-cn-a03 | em05-cn-a04 | fibocom-l610
   type: auto
   version_file: /etc/mmdc/4g_version
+  # 识别到模块后把版本号写回上面的文件（自维护缓存），厂商的 4G-info-get.service 可以永久停用
+  version_file_write: true
   # auto | at | external
   #   auto：读 AT+QCFG="usbnet"，QMI(0) 视为外部拨号工具负责，其余走 AT 上下行
   #   at：本服务用 AT+cgact 之类命令做数据上下行

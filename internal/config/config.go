@@ -49,6 +49,10 @@ type SerialConfig struct {
 type ModuleConfig struct {
 	Type        string `yaml:"type"`
 	VersionFile string `yaml:"version_file"`
+	// VersionFileWrite 让本服务在识别到模块后把版本号写回 VersionFile，
+	// 取代厂商的 4G-info-get.service（那个脚本会和本服务抢 AT 口）。
+	// 换模块时旧内容会被自动纠正，不需要人工删文件。
+	VersionFileWrite bool `yaml:"version_file_write"`
 	// DataMode 决定数据链路由谁拨：
 	//   auto     —— 读 AT+QCFG="usbnet"，QMI(0) 视为外部拨号工具负责，其余走 AT 上下行；
 	//   at       —— 强制由告警服务用 AT+cgact 之类命令做数据上下行；
@@ -76,7 +80,7 @@ type LogConfig struct {
 func Default() Config {
 	return Config{
 		Serial: SerialConfig{BaudRate: 115200},
-		Module: ModuleConfig{Type: "auto", VersionFile: "/etc/mmdc/4g_version", DataMode: "auto"},
+		Module: ModuleConfig{Type: "auto", VersionFile: "/etc/mmdc/4g_version", VersionFileWrite: true, DataMode: "auto"},
 		Keepalive: KeepaliveConfig{
 			Enabled:         true,
 			CheckInterval:   Duration(300 * time.Second),

@@ -18,6 +18,8 @@ SupplementaryGroups=dialout
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
+# 版本文件由本服务自己维护（取代会抢 AT 口的 4G-info-get.service），需要这一个可写目录。
+ReadWritePaths=/etc/mmdc
 ProtectHome=true
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 RestrictNamespaces=true

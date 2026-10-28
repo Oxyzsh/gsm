@@ -84,12 +84,13 @@ func run() int {
 	}()
 
 	controller := modem.NewController(session, session, modem.Config{
-		APN:         cfg.APN,
-		BaudRate:    cfg.Serial.BaudRate,
-		ModuleType:  cfg.Module.Type,
-		VersionFile: cfg.Module.VersionFile,
-		DataMode:    cfg.Module.DataMode,
-		Logger:      logger,
+		APN:              cfg.APN,
+		BaudRate:         cfg.Serial.BaudRate,
+		ModuleType:       cfg.Module.Type,
+		VersionFile:      cfg.Module.VersionFile,
+		VersionFileWrite: cfg.Module.VersionFileWrite,
+		DataMode:         cfg.Module.DataMode,
+		Logger:           logger,
 	})
 	service := api.New(controller, level)
 

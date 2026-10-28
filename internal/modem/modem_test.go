@@ -610,3 +610,87 @@ func TestTTSLibraryChineseNotTouched(t *testing.T) {
 		t.Fatalf("chinese TTS library must not be reconfigured: %v", transport.doCalls)
 	}
 }
+
+// identityTransport 模拟一个 EM05-CE 模块：ATI 带 Revision、CPIN 就绪、信号正常。
+func identityTransport() *fakeTransport {
+	return &fakeTransport{do: func(cmd string) (at.Reply, error) {
+		switch strings.ToUpper(strings.TrimSpace(cmd)) {
+		case "ATI":
+			return okReply("Quectel", "EM05", "Revision: EM05CEFCR06A06M1G_ND"), nil
+		case "AT+CGMM":
+			return okReply("EM05"), nil
+		case "AT+CGMR":
+			return okReply("EM05CEFCR06A06M1G_ND"), nil
+		case "AT+CPIN?":
+			return okReply("+CPIN: READY"), nil
+		case "AT+CSQ":
+			return okReply("+CSQ: 22,99"), nil
+		}
+		return okReply(), nil
+	}}
+}
+
+func TestVersionFileRewrittenFromAT(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "4g_version")
+	// 换过模块的场景：文件里还留着上一块 EM05-CN 的版本号。
+	if err := os.WriteFile(path, []byte("EM05CNFDR08A04M1G\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	controller := NewController(identityTransport(), nil, Config{
+		APN: "cmnet", BaudRate: 115200, ModuleType: "auto", VersionFile: path, VersionFileWrite: true,
+		PollInterval: time.Millisecond, BusyInterval: time.Millisecond,
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	result, err := controller.Status(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.HWType != ModuleEM05CE {
+		t.Fatalf("hw_type = %q, want %q（AT 实测应覆盖过期的版本文件）", result.HWType, ModuleEM05CE)
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(string(content)); got != "EM05CEFCR06A06M1G_ND" {
+		t.Fatalf("version file = %q, want the revision reported by AT", got)
+	}
+}
+
+func TestVersionFileWriteCanBeDisabled(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "4g_version")
+	if err := os.WriteFile(path, []byte("EM05CNFDR08A04M1G\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	controller := NewController(identityTransport(), nil, Config{
+		APN: "cmnet", BaudRate: 115200, ModuleType: "auto", VersionFile: path, VersionFileWrite: false,
+		PollInterval: time.Millisecond, BusyInterval: time.Millisecond,
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if _, err := controller.Status(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(string(content)); got != "EM05CNFDR08A04M1G" {
+		t.Fatalf("version file was modified although writes are disabled: %q", got)
+	}
+}
+
+func TestExplicitModuleTypeIsNotOverriddenByAT(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "4g_version")
+	controller := NewController(identityTransport(), nil, Config{
+		APN: "cmnet", BaudRate: 115200, ModuleType: "em05-cn-a04", VersionFile: path, VersionFileWrite: false,
+		PollInterval: time.Millisecond, BusyInterval: time.Millisecond,
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	result, err := controller.Status(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.HWType != ModuleEM05CN || result.Firmware != FirmwareA04 {
+		t.Fatalf("explicit module.type was overridden: %q/%q", result.HWType, result.Firmware)
+	}
+}

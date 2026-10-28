@@ -23,7 +23,9 @@ PESS 4G 模块管理服务（Go 实现），对应设计基线 [docs/gsm-go-dev.
 1. **AT 口只能有一个持有者。** 串口库打开 `/dev/ttyUSB2` 时会设置 TIOCEXCL，非 root 进程再打开会拿到 EBUSY。
    现场若还有其它脚本开机抢这个口（典型是厂商的 `4G-info-get.service` / `get_4g_version.sh`，
    它会 `cat /dev/ttyUSB2` 并发 `AT+QTTSEtup`），必须先停用它：
-   `systemctl disable --now 4G-info-get.service`，版本号由本服务通过 `ATI` 自行探测。
+   `systemctl disable --now 4G-info-get.service`。版本号由本服务实测 `/ATI`、`AT+CGMM`、`AT+CGMR`
+   后写回 `/etc/mmdc/4g_version`（`module.version_file_write`），所以换模块也**不需要手工删文件**：
+   `module.type=auto` 时以 AT 实测结果为准，文件与实测不一致会覆盖并记一条 warn。
    root 带 CAP_SYS_ADMIN 能绕过 TIOCEXCL，所以"停掉那个脚本"是必需步骤，不是可选项。
 2. **数据拨号不归本服务。** QMI 模式（`AT+QCFG="usbnet"` 为 0）下拨号由 `quectel-CM`
    （现场 `quectel-cm.service`）负责；本服务只做模块状态、短信、语音和模块控制。
@@ -90,6 +92,7 @@ journalctl -u gsmd -f
 ```bash
 sudo useradd -r -s /usr/sbin/nologin -G dialout gsmd || true
 sudo systemctl disable --now 4G-info-get.service     # 停掉抢 AT 口的厂商脚本
+sudo chown gsmd:gsmd /etc/mmdc/4g_version            # 让 gsmd 能维护版本缓存
 sudo make install ARCH=arm64
 sudo systemctl daemon-reload
 sudo systemctl enable --now gsmd
