@@ -238,3 +238,25 @@ with grpc.insecure_channel("127.0.0.1:50051") as channel:
 3. 用 `grpcurl` 或示例客户端完成状态、短信测试。
 4. 配置客户端 deadline、TLS/SSH 隧道和访问控制。
 5. 在业务侧实现 SMS 去重、故障分类和告警。
+
+## 11. go-pess 告警短信/电话接入
+
+go-pess 的告警通知层已支持直接调用本机 Go `gsmd`：
+
+- `personal_sms` → `pess.gsm.v1.GsmService/SendSMS`
+- `personal_voice` → `pess.gsm.v1.GsmService/SendVoice`
+
+默认 gRPC 地址：
+
+```text
+127.0.0.1:50051
+```
+
+告警设置中的“GSM gRPC 服务地址”为空时使用默认地址；也可以填写 `host:port`。如果填写 `http://` 或 `https://` 地址，则保留旧 C 版 `/ubus/call/gsm` HTTP JSON-RPC 兼容模式。环境变量 `GSM_GRPC_ADDR` 可在设置为空时覆盖默认地址。
+
+注意：
+
+- 短信通知最大保留 1072 个 BMP 字符。
+- 电话通知号码会归一化为 11 位数字，文本最多保留 480 个 BMP 字符。
+- gRPC 调用成功但业务状态不是 `GSM_STATUS_OK` 时，仍按发送失败记录。
+- 短信无幂等键，告警重试可能造成重复短信。

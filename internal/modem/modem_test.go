@@ -110,7 +110,7 @@ func TestStatusBranches(t *testing.T) {
 		}, StatusNoCard},
 		{"weak signal", func(cmd string) (at.Reply, error) {
 			if cmd == "AT+CSQ" {
-				return okReply("+CSQ: 16,0"), nil
+				return okReply("+CSQ: 15,0"), nil
 			}
 			if cmd == "AT+CPIN?" {
 				return okReply("+CPIN: READY"), nil
@@ -161,7 +161,7 @@ func TestSendSMSSingleSegment(t *testing.T) {
 	if result.Status != StatusOK || result.Segments != 1 {
 		t.Fatalf("result=%+v", result)
 	}
-	if len(transport.promptCalls) != 1 || transport.promptCalls[0] != "AT+CMGS=19" {
+	if len(transport.promptCalls) != 1 || transport.promptCalls[0] != "AT+CMGS=18" {
 		t.Fatalf("prompt calls=%v", transport.promptCalls)
 	}
 	if len(transport.rawCalls) != 1 || !strings.HasSuffix(string(transport.rawCalls[0]), "\x1a") {

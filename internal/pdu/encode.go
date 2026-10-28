@@ -118,9 +118,9 @@ func buildPDU(phone string, payload []byte, total, sequence int) string {
 	b.WriteString("00")
 	userData := payload
 	if total > 0 {
-		b.WriteString("51")
+		b.WriteString("41")
 	} else {
-		b.WriteString("11")
+		b.WriteString("01")
 	}
 	b.WriteString("00")
 	fmt.Fprintf(&b, "%02X", len(phone))
@@ -128,7 +128,6 @@ func buildPDU(phone string, payload []byte, total, sequence int) string {
 	b.WriteString(bcdNumber(phone))
 	b.WriteString("00")
 	b.WriteString("08")
-	b.WriteString("AA")
 
 	if total > 0 {
 		header := []byte{0x05, 0x00, 0x03, 0x01, byte(total), byte(sequence)}
