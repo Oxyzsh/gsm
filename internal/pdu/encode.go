@@ -101,7 +101,16 @@ func CMGSLength(pduHex string) (int, error) {
 	if len(pduHex) < 4 || len(pduHex)%2 != 0 {
 		return 0, fmt.Errorf("invalid PDU hex length %d", len(pduHex))
 	}
-	return len(pduHex) / 2, nil
+	smscLength, err := hex.DecodeString(pduHex[:2])
+	if err != nil {
+		return 0, fmt.Errorf("decode SMSC length: %w", err)
+	}
+	totalBytes := len(pduHex) / 2
+	smscFieldBytes := 1 + int(smscLength[0])
+	if totalBytes <= smscFieldBytes {
+		return 0, fmt.Errorf("PDU has %d bytes but SMSC field occupies %d bytes", totalBytes, smscFieldBytes)
+	}
+	return totalBytes - smscFieldBytes, nil
 }
 
 func buildPDU(phone string, payload []byte, total, sequence int) string {

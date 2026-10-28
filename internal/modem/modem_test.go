@@ -161,7 +161,7 @@ func TestSendSMSSingleSegment(t *testing.T) {
 	if result.Status != StatusOK || result.Segments != 1 {
 		t.Fatalf("result=%+v", result)
 	}
-	if len(transport.promptCalls) != 1 || transport.promptCalls[0] != "AT+CMGS=20" {
+	if len(transport.promptCalls) != 1 || transport.promptCalls[0] != "AT+CMGS=19" {
 		t.Fatalf("prompt calls=%v", transport.promptCalls)
 	}
 	if len(transport.rawCalls) != 1 || !strings.HasSuffix(string(transport.rawCalls[0]), "\x1a") {

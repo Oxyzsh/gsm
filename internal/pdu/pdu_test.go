@@ -52,8 +52,8 @@ func TestSMSGoldenPDU(t *testing.T) {
 			t.Fatalf("EncodeSMS(%q) = %#v, want %q", tc.text, pdus, tc.wantPDU)
 		}
 		length, err := CMGSLength(pdus[0])
-		if err != nil || length != 20 {
-			t.Fatalf("CMGSLength = %d, %v; want 20", length, err)
+		if err != nil || length != 19 {
+			t.Fatalf("CMGSLength = %d, %v; want 19", length, err)
 		}
 	}
 }
@@ -154,4 +154,20 @@ func contains(value, part string) bool {
 		}
 	}
 	return false
+}
+
+func TestCMGSLengthExcludesSMSCField(t *testing.T) {
+	cases := []struct {
+		pdu  string
+		want int
+	}{
+		{"0001000B917195569060F200080A00680065006C006C006F", 23},
+		{"0011000D91689171335642F40009AA0A00680065006C006C006F", 25},
+	}
+	for _, tc := range cases {
+		got, err := CMGSLength(tc.pdu)
+		if err != nil || got != tc.want {
+			t.Fatalf("CMGSLength(%q) = %d, %v; want %d", tc.pdu, got, err, tc.want)
+		}
+	}
 }
