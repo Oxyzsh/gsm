@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"go.bug.st/serial"
@@ -69,33 +70,16 @@ func Open(cfg Config) (*Session, error) {
 		}
 		port, err := serial.Open(cfg.Device, mode)
 		if err != nil {
+			// go.bug.st/serial 打开时会设置 TIOCEXCL：普通进程再次打开会拿到 EBUSY，
+			// 说明已有别的进程（典型是厂商的 4G-info-get.sh）占着这个 AT 口。
+			// 注意 root（CAP_SYS_ADMIN）能绕过 TIOCEXCL，所以现场仍要停掉那个脚本。
+			if errors.Is(err, syscall.EBUSY) || strings.Contains(strings.ToLower(err.Error()), "busy") {
+				return nil, fmt.Errorf("%w: %s (%v)", ErrDeviceBusy, cfg.Device, err)
+			}
 			return nil, err
 		}
-		release, err := lockDevice(cfg.Device)
-		if err != nil {
-			_ = port.Close()
-			return nil, err
-		}
-		return &lockedPort{Port: port, release: release}, nil
+		return port, nil
 	}), nil
-}
-
-// lockedPort 在串口句柄之外持有设备锁，Close 时一起释放。
-// 串口断开重连会重新走 opener，因此锁的生命周期与一次连接一致。
-type lockedPort struct {
-	Port
-	release func() error
-	once    sync.Once
-}
-
-func (p *lockedPort) Close() error {
-	err := p.Port.Close()
-	p.once.Do(func() {
-		if releaseErr := p.release(); releaseErr != nil && err == nil {
-			err = releaseErr
-		}
-	})
-	return err
 }
 
 func New(cfg Config, opener Opener) *Session {

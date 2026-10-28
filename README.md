@@ -20,10 +20,11 @@ PESS 4G 模块管理服务（Go 实现），对应设计基线 [docs/gsm-go-dev.
 
 部署前必须确认这三件事，否则会和现场已有服务互相踩：
 
-1. **AT 口只能有一个持有者。** 本服务独占 `/dev/ttyUSB2`（Linux 上用 flock 跨进程互斥）。
+1. **AT 口只能有一个持有者。** 串口库打开 `/dev/ttyUSB2` 时会设置 TIOCEXCL，非 root 进程再打开会拿到 EBUSY。
    现场若还有其它脚本开机抢这个口（典型是厂商的 `4G-info-get.service` / `get_4g_version.sh`，
    它会 `cat /dev/ttyUSB2` 并发 `AT+QTTSEtup`），必须先停用它：
    `systemctl disable --now 4G-info-get.service`，版本号由本服务通过 `ATI` 自行探测。
+   root 带 CAP_SYS_ADMIN 能绕过 TIOCEXCL，所以"停掉那个脚本"是必需步骤，不是可选项。
 2. **数据拨号不归本服务。** QMI 模式（`AT+QCFG="usbnet"` 为 0）下拨号由 `quectel-CM`
    （现场 `quectel-cm.service`）负责；本服务只做模块状态、短信、语音和模块控制。
    `module.data_mode=auto` 会自动识别，也可显式写 `external`/`at`。
