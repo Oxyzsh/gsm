@@ -52,8 +52,11 @@ func TestSMSGoldenPDU(t *testing.T) {
 			t.Fatalf("EncodeSMS(%q) = %#v, want %q", tc.text, pdus, tc.wantPDU)
 		}
 		length, err := CMGSLength(pdus[0])
-		if err != nil || length != 20 {
-			t.Fatalf("CMGSLength = %d, %v; want 20", length, err)
+		if err != nil || length != 19 {
+			t.Fatalf("CMGSLength = %d, %v; want 19 (TPDU octets without SMSC)", length, err)
+		}
+		if want := len(pdus[0])/2 - 1; length != want {
+			t.Fatalf("CMGSLength = %d, want whole PDU minus SMSC octet = %d", length, want)
 		}
 	}
 }

@@ -97,11 +97,15 @@ func EncodeSMS(phone, text string) ([]string, error) {
 }
 
 // CMGSLength returns the TP length argument for AT+CMGS, excluding SMSC.
+//
+// 注意这里是 TPDU 的字节数，不含前面的 SMSC 地址字段（本包固定写 "00" 表示用模块里
+// 已配置的短信中心，占 1 个字节 / 2 个十六进制字符）。曾经按整包长度下发，
+// 对长度校验严格的模块（如广和通 L610）会直接回 "+CMS ERROR: invalid length"。
 func CMGSLength(pduHex string) (int, error) {
 	if len(pduHex) < 4 || len(pduHex)%2 != 0 {
 		return 0, fmt.Errorf("invalid PDU hex length %d", len(pduHex))
 	}
-	return len(pduHex) / 2, nil
+	return (len(pduHex) - 2) / 2, nil
 }
 
 func buildPDU(phone string, payload []byte, total, sequence int) string {

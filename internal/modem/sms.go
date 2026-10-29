@@ -5,13 +5,40 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"go-pess/platform/user/pess/gsm/internal/at"
 	"go-pess/platform/user/pess/gsm/internal/pdu"
 )
 
+// SendSMS 发送短信，并把每次尝试的结果写进日志（号码打码）。
+//
+// 之前失败只把原因放在返回值里，现场只能看到页面一句"操作失败"，journal 里查不到任何线索。
 func (c *controller) SendSMS(ctx context.Context, number, message string) (SendResult, error) {
+	result, err := c.sendSMS(ctx, number, message)
+	masked := maskNumber(number)
+	switch {
+	case err != nil:
+		c.logger.Warn("SMS send aborted", "number", masked, "error", err)
+	case result.Status != StatusOK:
+		c.logger.Warn("SMS send failed", "number", masked, "status", int(result.Status), "detail", result.Detail)
+	default:
+		c.logger.Info("SMS sent", "number", masked, "segments", result.Segments)
+	}
+	return result, err
+}
+
+// maskNumber 只保留前 3 位和后 4 位，避免把完整手机号写进日志。
+func maskNumber(number string) string {
+	trimmed := strings.TrimSpace(number)
+	if len(trimmed) <= 7 {
+		return trimmed + "***"
+	}
+	return trimmed[:3] + "****" + trimmed[len(trimmed)-4:]
+}
+
+func (c *controller) sendSMS(ctx context.Context, number, message string) (SendResult, error) {
 	if dropped := pdu.DroppedNonBMP(message); dropped > 0 {
 		c.logger.Warn("SMS contains non-BMP characters; dropping them during UCS2 conversion", "count", dropped)
 	}
