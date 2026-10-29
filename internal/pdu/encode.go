@@ -97,15 +97,20 @@ func EncodeSMS(phone, text string) ([]string, error) {
 }
 
 // CMGSLength returns the TP length argument for AT+CMGS, excluding SMSC.
-//
-// 注意这里是 TPDU 的字节数，不含前面的 SMSC 地址字段（本包固定写 "00" 表示用模块里
-// 已配置的短信中心，占 1 个字节 / 2 个十六进制字符）。曾经按整包长度下发，
-// 对长度校验严格的模块（如广和通 L610）会直接回 "+CMS ERROR: invalid length"。
 func CMGSLength(pduHex string) (int, error) {
 	if len(pduHex) < 4 || len(pduHex)%2 != 0 {
 		return 0, fmt.Errorf("invalid PDU hex length %d", len(pduHex))
 	}
-	return (len(pduHex) - 2) / 2, nil
+	smscLength, err := hex.DecodeString(pduHex[:2])
+	if err != nil {
+		return 0, fmt.Errorf("decode SMSC length: %w", err)
+	}
+	totalBytes := len(pduHex) / 2
+	smscFieldBytes := 1 + int(smscLength[0])
+	if totalBytes <= smscFieldBytes {
+		return 0, fmt.Errorf("PDU has %d bytes but SMSC field occupies %d bytes", totalBytes, smscFieldBytes)
+	}
+	return totalBytes - smscFieldBytes, nil
 }
 
 func buildPDU(phone string, payload []byte, total, sequence int) string {
@@ -113,9 +118,9 @@ func buildPDU(phone string, payload []byte, total, sequence int) string {
 	b.WriteString("00")
 	userData := payload
 	if total > 0 {
-		b.WriteString("51")
+		b.WriteString("41")
 	} else {
-		b.WriteString("11")
+		b.WriteString("01")
 	}
 	b.WriteString("00")
 	fmt.Fprintf(&b, "%02X", len(phone))
@@ -123,7 +128,6 @@ func buildPDU(phone string, payload []byte, total, sequence int) string {
 	b.WriteString(bcdNumber(phone))
 	b.WriteString("00")
 	b.WriteString("08")
-	b.WriteString("AA")
 
 	if total > 0 {
 		header := []byte{0x05, 0x00, 0x03, 0x01, byte(total), byte(sequence)}

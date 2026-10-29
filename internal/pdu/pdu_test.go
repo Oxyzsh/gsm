@@ -40,8 +40,8 @@ func TestSMSGoldenPDU(t *testing.T) {
 		text    string
 		wantPDU string
 	}{
-		{"你好", "0011000D91683116325476F80008AA044F60597D"},
-		{"OK", "0011000D91683116325476F80008AA04004F004B"},
+		{"你好", "0001000D91683116325476F80008044F60597D"},
+		{"OK", "0001000D91683116325476F8000804004F004B"},
 	}
 	for _, tc := range tests {
 		pdus, err := EncodeSMS("13612345678", tc.text)
@@ -52,11 +52,8 @@ func TestSMSGoldenPDU(t *testing.T) {
 			t.Fatalf("EncodeSMS(%q) = %#v, want %q", tc.text, pdus, tc.wantPDU)
 		}
 		length, err := CMGSLength(pdus[0])
-		if err != nil || length != 19 {
-			t.Fatalf("CMGSLength = %d, %v; want 19 (TPDU octets without SMSC)", length, err)
-		}
-		if want := len(pdus[0])/2 - 1; length != want {
-			t.Fatalf("CMGSLength = %d, want whole PDU minus SMSC octet = %d", length, want)
+		if err != nil || length != 18 {
+			t.Fatalf("CMGSLength = %d, %v; want 18", length, err)
 		}
 	}
 }
@@ -126,7 +123,7 @@ func parseUDL(t *testing.T, pduHex string) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	offset := 10 + ((int(daLength)+1)/2)*2 + 6
+	offset := 10 + ((int(daLength)+1)/2)*2 + 4
 	udl, err := hexByte(pduHex[offset : offset+2])
 	if err != nil {
 		t.Fatal(err)
@@ -157,4 +154,20 @@ func contains(value, part string) bool {
 		}
 	}
 	return false
+}
+
+func TestCMGSLengthExcludesSMSCField(t *testing.T) {
+	cases := []struct {
+		pdu  string
+		want int
+	}{
+		{"0001000B917195569060F200080A00680065006C006C006F", 23},
+		{"0011000D91689171335642F40009AA0A00680065006C006C006F", 25},
+	}
+	for _, tc := range cases {
+		got, err := CMGSLength(tc.pdu)
+		if err != nil || got != tc.want {
+			t.Fatalf("CMGSLength(%q) = %d, %v; want %d", tc.pdu, got, err, tc.want)
+		}
+	}
 }

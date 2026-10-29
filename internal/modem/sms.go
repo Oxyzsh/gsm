@@ -98,6 +98,7 @@ func (c *controller) sendSMS(ctx context.Context, number, message string) (SendR
 		if err != nil {
 			return SendResult{Status: StatusOperationFailed, Detail: err.Error()}, nil
 		}
+		c.logger.Debug("submitting SMS segment", "segment", index+1, "cmgs_length", length, "pdu_bytes", len(pduHex)/2)
 		promptCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		err = c.transport.WaitPrompt(promptCtx, "AT+CMGS="+strconv.Itoa(length))
 		cancel()

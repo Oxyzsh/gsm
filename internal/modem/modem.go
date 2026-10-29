@@ -332,7 +332,7 @@ func (c *controller) statusLocked(ctx context.Context) (StatusResult, error) {
 		ber, _ := strconv.Atoi(match[2])
 		result.RSSI = rssi
 		result.BER = ber
-		if rssi <= 16 || rssi == 99 {
+		if rssi < 16 || rssi == 99 {
 			result.Status = StatusNoSignal
 			result.Detail = StatusNoSignal.Detail()
 			c.cacheStatus(result)
