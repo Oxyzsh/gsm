@@ -121,6 +121,10 @@ func identifyModule(text string) (moduleType, firmware string, ok bool) {
 		return ModuleEM05CN, variant, true
 	case strings.Contains(compact, "L610"), strings.Contains(compact, "LC610"):
 		return ModuleFibocom, FirmwareL610, true
+	// L610 的固件版本形如 16000.1000.00.06.74.05，版本文件里只存版本号时也能认出来，
+	// 省掉每次开机都去 ATI 探一次（并避免"版本文件无法识别"的告警日志）。
+	case strings.HasPrefix(compact, "16000."):
+		return ModuleFibocom, FirmwareL610, true
 	case strings.Contains(compact, "FIBOCOM"):
 		return ModuleFibocom, FirmwareUnknown, true
 	default:

@@ -84,7 +84,7 @@ sudo systemctl enable --now gsmd
 journalctl -u gsmd -f
 ```
 
-生产配置位于 `/etc/gsm/gsm.yaml`。串口设备、APN 和模块类型需按现场调整。`make install` 只在
+生产配置位于 `/etc/gsm/gsm.yaml`。串口设备、APN 和模块类型需按现场调整；`apn: auto` 会按 SIM 的 IMSI 自动选移动 `cmnet` / 联通 `3gnet` / 电信 `ctnet`，填具体值时以配置为准。`make install` 只在
 `/etc/gsm/gsm.yaml` 不存在时写入，升级不会覆盖现场配置。非回环监听会记录安全告警，且该服务本身不提供 TLS 或鉴权。
 
 首次部署顺序：

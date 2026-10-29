@@ -154,6 +154,8 @@ type controller struct {
 	detectionAttempted bool
 	dataMode           string // "" 未判定；"at" 本服务拨；"external" 外部工具拨
 	ttsChecked         bool
+	apnResolved        string // apn=auto 时按 IMSI 推出来的 APN（空=还没读到卡）
+	apnApplied         string // 已经下发给模块的 APN，避免每次轮询重复下发
 	lastStatus         StatusResult
 }
 
@@ -317,6 +319,7 @@ func (c *controller) statusLocked(ctx context.Context) (StatusResult, error) {
 	}
 
 	c.ensureTTSLocked(ctx)
+	c.ensureAPNLocked(ctx)
 
 	csq, err := c.command(ctx, "AT+CSQ", 3*time.Second)
 	if err != nil {
@@ -377,8 +380,13 @@ func (c *controller) resetLocked(ctx context.Context) error {
 
 	commands := []string{
 		"ATE0",
-		fmt.Sprintf(`AT+cgdcont=1,"IP","%s"`, c.cfg.APN),
 	}
+	if apn := c.resetAPNLocked(); apn != "" {
+		commands = append(commands, fmt.Sprintf(`AT+cgdcont=1,"IP","%s"`, apn))
+	}
+	// 复位后模块重新读卡，IMSI/APN 缓存要作废，下次状态检查重新解析。
+	c.apnResolved = ""
+	c.apnApplied = ""
 	if !c.dataDialingExternal() {
 		commands = append(commands, profile.ExtraResetCommands...)
 	}

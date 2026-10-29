@@ -14,7 +14,10 @@ module:
   #   external：数据拨号完全交给 quectel-CM，本服务不发任何拨号命令
   data_mode: auto
 
-apn: cmnet
+# auto：读卡里的 IMSI 判断运营商，自动用移动 cmnet / 联通 3gnet / 电信 ctnet
+# 填具体值：以这里为准（物联网卡、定向卡等非标 APN 用这条），不再按运营商覆盖
+# 注意：QMI 模式（quectel-CM 拨号）还要把同一个 APN 传给 quectel-CM 的 -s 参数
+apn: auto
 
 keepalive:
   enabled: true

@@ -286,7 +286,7 @@ Go 版本要求：1.22 及以上（使用 `log/slog`、`context.WithoutCancel`�
 | `serial.baud_rate` | int | 否 | `115200` | 波特率，必须大于 0 |
 | `module.type` | string | 否 | `auto` | `auto`/`em05-ce`/`em05-cn`/`em05-cn-a03`/`em05-cn-a04`/`fibocom`/`fibocom-l610` |
 | `module.version_file` | string | 否 | `/etc/mmdc/4g_version` | `auto` 模式下读取的版本文件 |
-| `apn` | string | 是 | — | 移动 `cmnet`，电信 `ctnet`；仅复位流程使用 |
+| `apn` | string | 是 | — | `auto` 按 IMSI 选运营商默认 APN（移动 `cmnet`/联通 `3gnet`/电信 `ctnet`）；填具体值时以配置为准 |
 | `keepalive.enabled` | bool | 否 | `true` | 是否启动保活 |
 | `keepalive.check_interval` | duration | 否 | `300s` | 正常/不可自动恢复状态的检测间隔 |
 | `keepalive.retry_interval` | duration | 否 | `10s` | 执行重拨/复位后的下次检测间隔 |
