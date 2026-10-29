@@ -63,6 +63,13 @@ func run() int {
 	logger := newLogger(level, cfg.Log.Format)
 	slog.SetDefault(logger)
 
+	device, err := at.ResolveDevice(cfg.Serial.Device, logger)
+	if err != nil {
+		logger.Error("resolve AT port failed", "error", err, "configured", cfg.Serial.Device)
+		return 1
+	}
+	cfg.Serial.Device = device
+
 	session, err := at.Open(at.Config{
 		Device:   cfg.Serial.Device,
 		BaudRate: cfg.Serial.BaudRate,

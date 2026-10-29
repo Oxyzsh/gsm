@@ -1,5 +1,7 @@
 serial:
-  device: /dev/ttyUSB2
+  # auto：按 /dev/serial/by-id/*-if02-port0 自动找 AT 口（EM05 上是 ttyUSB2，L610 上是 ttyUSB0，
+  # 换机器不用改配置）；填具体路径则以配置为准。
+  device: auto
   baud_rate: 115200
 
 module:

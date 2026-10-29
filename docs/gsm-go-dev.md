@@ -282,7 +282,7 @@ Go 版本要求：1.22 及以上（使用 `log/slog`、`context.WithoutCancel`�
 
 | 字段 | 类型 | 必填 | 默认值 | 说明 |
 | --- | --- | --- | --- | --- |
-| `serial.device` | string | 是 | — | 串口设备路径 |
+| `serial.device` | string | 是 | — | 串口设备路径；`auto` 按 `/dev/serial/by-id/*-if02-port0` 自动找 AT 口（EM05=ttyUSB2、L610=ttyUSB0 都不用改配置） |
 | `serial.baud_rate` | int | 否 | `115200` | 波特率，必须大于 0 |
 | `module.type` | string | 否 | `auto` | `auto`/`em05-ce`/`em05-cn`/`em05-cn-a03`/`em05-cn-a04`/`fibocom`/`fibocom-l610` |
 | `module.version_file` | string | 否 | `/etc/mmdc/4g_version` | `auto` 模式下读取的版本文件 |
@@ -302,7 +302,7 @@ Go 版本要求：1.22 及以上（使用 `log/slog`、`context.WithoutCancel`�
 
 ```yaml
 serial:
-  device: /dev/ttyUSB2
+  device: auto
   baud_rate: 115200
 
 module:
@@ -330,7 +330,7 @@ log:
 
 加载后逐项校验，失败时记录具体字段名并以退出码 2 退出：
 
-- `serial.device` 非空，建议为绝对路径。
+- `serial.device` 非空；填 `auto` 时由程序自动解析，填具体路径则以配置为准（建议绝对路径）。
 - `serial.baud_rate` 在 110–4000000 之间；具体支持范围由串口库决定。
 - `module.type` 属于枚举值；`module.version_file` 在 `auto` 模式下非空。
 - `apn` 非空。

@@ -1,12 +1,14 @@
 [Unit]
 Description=PESS GSM (4G module) AT service
-After=network.target dev-ttyUSB2.device
-Wants=network.target dev-ttyUSB2.device
+# 不写死串口设备：EM05 上是 ttyUSB2、L610 上是 ttyUSB0，由 gsmd 自己按
+# /dev/serial/by-id/*-if02-port0 找 AT 口，换机器不用改这张 unit。
+After=network.target
+Wants=network.target
 
 [Service]
 Type=simple
-# 等 AT 串口出现（最多 300s）：模块 USB 枚举晚于 systemd 时不要进入无谓的重启循环。
-ExecStartPre=/bin/sh -c 'i=0; while [ ! -e /dev/ttyUSB2 ]; do i=$((i+1)); if [ $i -ge 60 ]; then echo "4G AT port /dev/ttyUSB2 not found" >&2; exit 1; fi; sleep 5; done'
+# 等 AT 口出现（最多 300s）：模块 USB 枚举晚于 systemd 时不要进入无谓的重启循环。
+ExecStartPre=/bin/sh -c 'i=0; while ! ls /dev/serial/by-id/*-if02-port0 >/dev/null 2>&1 && ! ls /dev/ttyUSB0 >/dev/null 2>&1; do i=$((i+1)); if [ $i -ge 60 ]; then echo "no 4G AT port found" >&2; exit 1; fi; sleep 5; done'
 ExecStart=/usr/sbin/gsmd -config /etc/gsm/gsm.yaml
 # 常驻服务：串口掉线、模块复位后自己重连；只有配置错误(退出码 2)不重启。
 Restart=always

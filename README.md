@@ -20,7 +20,7 @@ PESS 4G 模块管理服务（Go 实现），对应设计基线 [docs/gsm-go-dev.
 
 部署前必须确认这三件事，否则会和现场已有服务互相踩：
 
-1. **AT 口只能有一个持有者。** 串口库打开 `/dev/ttyUSB2` 时会设置 TIOCEXCL，非 root 进程再打开会拿到 EBUSY。
+1. **AT 口只能有一个持有者。** `serial.device: auto` 时按 udev 的稳定名 `/dev/serial/by-id/*-if02-port0` 找 AT 口（EM05 上是 `ttyUSB2`，L610 上是 `ttyUSB0`）。串口库打开该设备时会设置 TIOCEXCL，非 root 进程再打开会拿到 EBUSY。
    现场若还有其它脚本开机抢这个口（典型是厂商的 `4G-info-get.service` / `get_4g_version.sh`，
    它会 `cat /dev/ttyUSB2` 并发 `AT+QTTSEtup`），必须先停用它：
    `systemctl disable --now 4G-info-get.service`。版本号由本服务实测 `/ATI`、`AT+CGMM`、`AT+CGMR`
