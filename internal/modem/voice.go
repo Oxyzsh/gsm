@@ -74,7 +74,7 @@ func (c *controller) SendVoice(ctx context.Context, number, message string) (Sta
 		return c.currentResult(StatusOperationFailed, voiceFailureDetail("dial", err)), nil
 	}
 
-	if err := c.waitForActiveCall(ctx); err != nil {
+	if err := c.waitForActiveCall(ctx, phone); err != nil {
 		if isContextError(err) {
 			return c.currentResult(StatusOperationFailed, "request canceled"), err
 		}
@@ -97,7 +97,7 @@ func (c *controller) SendVoice(ctx context.Context, number, message string) (Sta
 	return c.currentResult(StatusOK, StatusOK.Detail()), nil
 }
 
-func (c *controller) waitForActiveCall(ctx context.Context) error {
+func (c *controller) waitForActiveCall(ctx context.Context, targetPhone string) error {
 	deadline := time.Now().Add(15 * time.Second)
 	for {
 		if !time.Now().Before(deadline) {
@@ -117,7 +117,7 @@ func (c *controller) waitForActiveCall(ctx context.Context) error {
 			c.logger.Warn("AT+CLCC polling failed; continuing", "error", err)
 			continue
 		}
-		if hasActiveCall(reply.Lines) {
+		if hasActiveCallForNumber(reply.Lines, targetPhone) {
 			return nil
 		}
 	}
@@ -186,7 +186,14 @@ func sanitizeTTSText(message string) (string, error) {
 	return cleaned, nil
 }
 
-func hasActiveCall(lines []string) bool {
+// hasActiveCallForNumber 只接受目标号码的外呼已接通记录。
+// 部分模块会同时返回多条号码为空的 state=0 伪通话，不能把任意 state=0
+// 当作目标电话已经接通。
+func hasActiveCallForNumber(lines []string, targetPhone string) bool {
+	targetPhone = normalizeCLCCNumber(targetPhone)
+	if targetPhone == "" {
+		return false
+	}
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if !strings.HasPrefix(strings.ToUpper(trimmed), "+CLCC:") {
@@ -197,15 +204,34 @@ func hasActiveCall(lines []string) bool {
 			continue
 		}
 		fields := strings.Split(strings.TrimSpace(trimmed[colon+1:]), ",")
-		if len(fields) < 3 {
+		if len(fields) < 6 {
 			continue
 		}
-		state, err := strconv.Atoi(strings.TrimSpace(fields[2]))
-		if err == nil && state == 0 {
+		direction, dirErr := strconv.Atoi(strings.TrimSpace(fields[1]))
+		state, stateErr := strconv.Atoi(strings.TrimSpace(fields[2]))
+		if dirErr != nil || stateErr != nil || direction != 0 || state != 0 {
+			continue
+		}
+		if normalizeCLCCNumber(fields[5]) == targetPhone {
 			return true
 		}
 	}
 	return false
+}
+
+func normalizeCLCCNumber(value string) string {
+	value = strings.Trim(strings.TrimSpace(value), `"`)
+	var digits strings.Builder
+	for _, r := range value {
+		if r >= '0' && r <= '9' {
+			digits.WriteRune(r)
+		}
+	}
+	number := digits.String()
+	if len(number) == 13 && strings.HasPrefix(number, "86") {
+		return number[2:]
+	}
+	return number
 }
 
 func voiceFailureDetail(operation string, err error) string {

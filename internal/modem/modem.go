@@ -160,10 +160,11 @@ type controller struct {
 }
 
 var (
-	csqPattern   = regexp.MustCompile(`(?i)\+CSQ:\s*(\d+)\s*,\s*(\d+)`)
-	cpinPattern  = regexp.MustCompile(`(?i)^\+CPIN:\s*READY\s*$`)
-	cpasPattern  = regexp.MustCompile(`(?i)\+CPAS:\s*(\d+)`)
-	qwttsPattern = regexp.MustCompile(`(?i)\+QWTTS:\s*0(?:\s|$)`)
+	csqPattern      = regexp.MustCompile(`(?i)\+CSQ:\s*(\d+)\s*,\s*(\d+)`)
+	cpinPattern     = regexp.MustCompile(`(?i)^\+CPIN:\s*READY\s*$`)
+	cpasPattern     = regexp.MustCompile(`(?i)\+CPAS:\s*(\d+)`)
+	qwttsPattern    = regexp.MustCompile(`(?i)\+QWTTS:\s*0(?:\s|$)`)
+	gttsIdlePattern = regexp.MustCompile(`(?i)\+GTTS:\s*0(?:\s|$)`)
 
 	// qcfgUsbnetPattern 解析 AT+QCFG="usbnet" 的数据面模式：
 	// 0=QMI（数据由 QMI 拨号工具负责）、1=ECM、2=MBIM、3=RNDIS。

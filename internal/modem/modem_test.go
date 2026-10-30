@@ -204,7 +204,7 @@ func TestSendVoiceSuccessAlwaysHangsUp(t *testing.T) {
 		case "AT+CPAS":
 			return okReply("+CPAS: 0"), nil
 		case "AT+CLCC":
-			return okReply("+CLCC: 1,0,0,0,0"), nil
+			return okReply(`+CLCC: 1,0,0,0,0,"13612345678",129`), nil
 		case "AT+QWTTS?":
 			return okReply("+QWTTS: 0"), nil
 		default:
@@ -432,7 +432,7 @@ func TestEM05CNa04AllowsUnicomVoice(t *testing.T) {
 		case "AT+CPAS":
 			return okReply("+CPAS: 0"), nil
 		case "AT+CLCC":
-			return okReply("+CLCC: 1,0,0,0,0"), nil
+			return okReply(`+CLCC: 1,0,0,0,0,"13612345678",129`), nil
 		case "AT+QWTTS?":
 			return okReply("+QWTTS: 0"), nil
 		default:

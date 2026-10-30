@@ -120,3 +120,30 @@ func hasPrefixCall(calls []string, prefix string) bool {
 	}
 	return false
 }
+
+func TestTTSIdlePatterns(t *testing.T) {
+	if !qwttsPattern.MatchString("+QWTTS: 0") {
+		t.Fatal("QWTTS idle pattern did not match")
+	}
+	if !gttsIdlePattern.MatchString("+GTTS: 0") {
+		t.Fatal("GTTS idle pattern did not match")
+	}
+}
+
+func TestHasActiveCallForNumberIgnoresPhantomEntries(t *testing.T) {
+	lines := []string{
+		`+CLCC: 1,1,0,1,0,"",128`,
+		`+CLCC: 2,1,0,1,0,"",128`,
+		`+CLCC: 3,0,2,0,0,"19974960989",129`,
+	}
+	if hasActiveCallForNumber(lines, "19974960989") {
+		t.Fatal("dialing call must not be treated as answered")
+	}
+	lines[2] = `+CLCC: 3,0,0,0,0,"19974960989",129`
+	if !hasActiveCallForNumber(lines, "19974960989") {
+		t.Fatal("matching outgoing active call was not detected")
+	}
+	if hasActiveCallForNumber(lines, "13612345678") {
+		t.Fatal("different phone number must not match")
+	}
+}
