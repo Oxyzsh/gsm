@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"unicode/utf8"
 
 	"golang.org/x/text/encoding/unicode"
@@ -63,7 +64,15 @@ func EncodeTTS(text string) (string, error) {
 }
 
 // EncodeSMS builds one or more complete SMS-SUBMIT PDUs for a destination.
+//
+// 长短信会被拆成多条独立短信（协议上没有"一次提交整条"），每条带 UDH；
+// 同一条长短信的所有段共用一个 8-bit reference number，收端靠它归并。
 func EncodeSMS(phone, text string) ([]string, error) {
+	return encodeSMS(phone, text, nextConcatRef())
+}
+
+// encodeSMS 用指定 reference number 编码，便于测试断言；生产走 EncodeSMS 自增分配。
+func encodeSMS(phone, text string, ref byte) ([]string, error) {
 	normalized, err := NormalizePhone(phone)
 	if err != nil {
 		return nil, err
@@ -77,7 +86,7 @@ func EncodeSMS(phone, text string) ([]string, error) {
 	}
 
 	if len(encoded) <= singleSMSBytes {
-		return []string{buildPDU(normalized, encoded, 0, 0)}, nil
+		return []string{buildPDU(normalized, encoded, 0, 0, 0)}, nil
 	}
 
 	total := (len(encoded) + concatSMSBytes - 1) / concatSMSBytes
@@ -91,9 +100,24 @@ func EncodeSMS(phone, text string) ([]string, error) {
 		if end > len(encoded) {
 			end = len(encoded)
 		}
-		pdus = append(pdus, buildPDU(normalized, encoded[start:end], total, sequence))
+		pdus = append(pdus, buildPDU(normalized, encoded[start:end], total, sequence, ref))
 	}
 	return pdus, nil
+}
+
+// concatRefCounter 给每条长短信分配不同的 reference number。
+//
+// 参考号写死时，同一号码短时间内收到两条长短信，收端会把两条的片段当成同一条混拼
+// （表现为串行、丢字或整条不显示）。1..255 循环，跳过 0 便于和"未分配"区分。
+var concatRefCounter atomic.Uint32
+
+func nextConcatRef() byte {
+	v := concatRefCounter.Add(1)
+	ref := byte(v % 255)
+	if ref == 0 {
+		ref = 255
+	}
+	return ref
 }
 
 // CMGSLength returns the TP length argument for AT+CMGS, excluding SMSC.
@@ -113,7 +137,7 @@ func CMGSLength(pduHex string) (int, error) {
 	return totalBytes - smscFieldBytes, nil
 }
 
-func buildPDU(phone string, payload []byte, total, sequence int) string {
+func buildPDU(phone string, payload []byte, total, sequence int, ref byte) string {
 	var b strings.Builder
 	b.WriteString("00")
 	userData := payload
@@ -130,7 +154,7 @@ func buildPDU(phone string, payload []byte, total, sequence int) string {
 	b.WriteString("08")
 
 	if total > 0 {
-		header := []byte{0x05, 0x00, 0x03, 0x01, byte(total), byte(sequence)}
+		header := []byte{0x05, 0x00, 0x03, ref, byte(total), byte(sequence)}
 		userData = make([]byte, 0, len(header)+len(payload))
 		userData = append(userData, header...)
 		userData = append(userData, payload...)

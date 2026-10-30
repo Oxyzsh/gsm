@@ -2,6 +2,7 @@ package pdu
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -66,14 +67,15 @@ func TestSMSBoundaries(t *testing.T) {
 	}
 
 	seventyOne := repeatRune('啊', 71)
-	pdus, err = EncodeSMS("13612345678", seventyOne)
+	pdus, err = encodeSMS("13612345678", seventyOne, 0x2A)
 	if err != nil || len(pdus) != 2 {
 		t.Fatalf("71-char SMS: segments=%d err=%v", len(pdus), err)
 	}
 	if parseUDL(t, pdus[0]) != 140 || parseUDL(t, pdus[1]) != 14 {
 		t.Fatalf("unexpected multipart UDL: %v", pdus)
 	}
-	if !contains(pdus[0], "050003010201") || !contains(pdus[1], "050003010202") {
+	// UDH：05 00 03 <ref> <total> <seq>，同一条长短信所有段共用一个 ref。
+	if !contains(pdus[0], "0500032A0201") || !contains(pdus[1], "0500032A0202") {
 		t.Fatalf("unexpected multipart UDH: %v", pdus)
 	}
 
@@ -83,6 +85,43 @@ func TestSMSBoundaries(t *testing.T) {
 	if _, err = EncodeSMS("13612345678", repeatRune('啊', 1073)); !errors.Is(err, ErrTextTooLong) {
 		t.Fatalf("1073-char SMS error = %v, want ErrTextTooLong", err)
 	}
+}
+
+// TestConcatReferenceIsPerMessageUnique 保证连续两条长短信不会共用同一个 ref：
+// 共用时收端会把两条的片段当成同一条混拼（串行/丢字/整条不显示）。
+func TestConcatReferenceIsPerMessageUnique(t *testing.T) {
+	text := repeatRune('啊', 140) // 3 段
+	first, err := EncodeSMS("13612345678", text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := EncodeSMS("13612345678", text)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	firstRef := extractConcatRef(t, first[0])
+	secondRef := extractConcatRef(t, second[0])
+	if firstRef == secondRef {
+		t.Fatalf("两条长短信共用了 ref=%s", firstRef)
+	}
+	for _, pduHex := range first {
+		if got := extractConcatRef(t, pduHex); got != firstRef {
+			t.Fatalf("同一条长短信的 ref 不一致: %s vs %s", got, firstRef)
+		}
+	}
+}
+
+// extractConcatRef 从 PDU 里取 8-bit concat 的 reference number。
+func extractConcatRef(t *testing.T, pduHex string) string {
+	t.Helper()
+	marker := "050003"
+	index := strings.Index(pduHex, marker)
+	if index < 0 {
+		t.Fatalf("PDU 里找不到 UDH: %s", pduHex)
+	}
+	start := index + len(marker)
+	return pduHex[start : start+2]
 }
 
 func TestEncodeUCS2DropsNonBMP(t *testing.T) {

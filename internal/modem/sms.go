@@ -29,6 +29,9 @@ func (c *controller) SendSMS(ctx context.Context, number, message string) (SendR
 	return result, err
 }
 
+// segmentPause 是长短信相邻两段之间的间隔（测试里置 0）。
+var segmentPause = 300 * time.Millisecond
+
 // maskNumber 只保留前 3 位和后 4 位，避免把完整手机号写进日志。
 func maskNumber(number string) string {
 	trimmed := strings.TrimSpace(number)
@@ -94,11 +97,20 @@ func (c *controller) sendSMS(ctx context.Context, number, message string) (SendR
 	}
 
 	for index, pduHex := range pdus {
+		// 长短信是 N 条独立短信，逐条提交。段间留一点间隔：运营商对同一号码
+		// 有速率限制，16 段连着打容易被限速或被模块缓冲挤掉。
+		if index > 0 && segmentPause > 0 {
+			select {
+			case <-time.After(segmentPause):
+			case <-ctx.Done():
+				return c.smsFailure(ctx, index+1, "segment pacing", ctx.Err())
+			}
+		}
 		length, err := pdu.CMGSLength(pduHex)
 		if err != nil {
 			return SendResult{Status: StatusOperationFailed, Detail: err.Error()}, nil
 		}
-		c.logger.Debug("submitting SMS segment", "segment", index+1, "cmgs_length", length, "pdu_bytes", len(pduHex)/2)
+		c.logger.Debug("submitting SMS segment", "segment", index+1, "total", len(pdus), "cmgs_length", length, "pdu_bytes", len(pduHex)/2)
 		promptCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		err = c.transport.WaitPrompt(promptCtx, "AT+CMGS="+strconv.Itoa(length))
 		cancel()
@@ -116,7 +128,8 @@ func (c *controller) sendSMS(ctx context.Context, number, message string) (SendR
 			if err != nil {
 				return c.smsFailure(ctx, index+1, "SMS PDU submission", err)
 			}
-			return SendResult{Status: StatusOperationFailed, Detail: fmt.Sprintf("segment %d/%d failed: %s", index+1, len(pdus), reply.Final())}, nil
+			return SendResult{Status: StatusOperationFailed, Detail: fmt.Sprintf(
+				"segment %d/%d failed: %s（前 %d 段已提交，不做重试）", index+1, len(pdus), reply.Final(), index)}, nil
 		}
 	}
 	return SendResult{Status: StatusOK, Detail: StatusOK.Detail(), Segments: len(pdus)}, nil
@@ -126,9 +139,15 @@ func (c *controller) smsFailure(ctx context.Context, segment int, operation stri
 	if isContextError(err) {
 		return SendResult{Status: StatusOperationFailed, Detail: "request canceled; sent segments are not rolled back"}, err
 	}
+	submitted := segment - 1
+	if submitted < 0 {
+		submitted = 0
+	}
 	var terminal *at.TerminalError
 	if errors.As(err, &terminal) {
-		return SendResult{Status: StatusOperationFailed, Detail: fmt.Sprintf("segment %d %s failed: %s", segment, operation, terminal.Error())}, nil
+		return SendResult{Status: StatusOperationFailed, Detail: fmt.Sprintf(
+			"segment %d %s failed: %s（前 %d 段已提交，不做重试）", segment, operation, terminal.Error(), submitted)}, nil
 	}
-	return SendResult{Status: StatusOperationFailed, Detail: fmt.Sprintf("segment %d %s failed: %v", segment, operation, err)}, nil
+	return SendResult{Status: StatusOperationFailed, Detail: fmt.Sprintf(
+		"segment %d %s failed: %v（前 %d 段已提交，不做重试）", segment, operation, err, submitted)}, nil
 }
