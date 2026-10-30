@@ -11,13 +11,20 @@ const (
 	FirmwareA04     = "A04"
 	FirmwareL610    = "L610"
 	FirmwareUnknown = "unknown"
+
+	// TTS 方言：不同厂商的语音合成命令不一样，业务代码只认方言名，不认具体 AT 串。
+	TTSStyleNone  = ""       // 不支持语音播报
+	TTSStyleQWTTS = "qwt ts" // 移远：AT+QWTTS=1,1,1,"<UCS2 hex>"，进度用 AT+QWTTS? 查
+	TTSStyleGTTS  = "gtts"   // 广和通：AT+GTTS=1,"<明文>",0，进度用 AT+GTTS? 查
 )
 
 type moduleProfile struct {
-	Type               string
-	Firmware           string
-	SupportsVoice      bool
-	BusyCheck          bool
+	Type          string
+	Firmware      string
+	SupportsVoice bool
+	// TTSStyle 决定用哪套语音合成命令；为空表示只能拨号不能播报。
+	TTSStyle  string
+	BusyCheck bool
 	// TTSSetup 表示模块支持 AT+QTTSETUP 查询/切换语音合成语言库；
 	// 只有移远 EM05 系列有这条命令，广和通不发。
 	TTSSetup           bool
@@ -35,6 +42,7 @@ func profileFor(moduleType, firmware string) moduleProfile {
 			Type:               moduleType,
 			Firmware:           normalizeFirmware(firmware),
 			SupportsVoice:      true,
+			TTSStyle:           TTSStyleQWTTS,
 			BusyCheck:          true,
 			TTSSetup:           true,
 			ResetCommands:      []string{"AT^reset", "AT+CFUN=1,1"},
@@ -45,9 +53,14 @@ func profileFor(moduleType, firmware string) moduleProfile {
 		}
 	case ModuleFibocom:
 		return moduleProfile{
-			Type:            ModuleFibocom,
-			Firmware:        normalizeFirmware(firmware),
-			SupportsVoice:   false,
+			Type:          ModuleFibocom,
+			Firmware:      normalizeFirmware(firmware),
+			SupportsVoice: false,
+			// L610 固件里有 AT+GTTS，但本版本（16000.1000.00.06.74.05）实测
+			// AT+GTTS=1,"<文本>",0/1 恒回 +CME ERROR: parameters are invalid（通话中/外都一样），
+			// 参数含义需要 Fibocom 手册确认。代码路径已就绪（TTSStyleGTTS），
+			// 确认参数后把 SupportsVoice 改回 true、TTSStyle 设为 TTSStyleGTTS 即可。
+			TTSStyle:        TTSStyleNone,
 			BusyCheck:       false,
 			ResetCommands:   []string{"AT+CFUN=15", "AT+CFUN=1,1"},
 			DataDownCommand: "AT+GTRNDIS=0,1",

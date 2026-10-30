@@ -20,13 +20,24 @@ func (c *controller) SendVoice(ctx context.Context, number, message string) (Sta
 	if err != nil {
 		return c.currentResult(StatusOperationFailed, "voice number must be exactly 11 digits"), &ValidationError{Field: "phone_number", Reason: err.Error()}
 	}
-	hexText, err := pdu.EncodeTTS(message)
-	if err != nil {
-		return c.currentResult(StatusOperationFailed, "invalid voice text"), &ValidationError{Field: "message", Reason: err.Error()}
-	}
 	profile := c.profile()
-	if !profile.SupportsVoice {
-		return c.currentResult(StatusOperationFailed, "module does not support QWTTS voice"), ErrVoiceUnsupported
+	if !profile.SupportsVoice || strings.TrimSpace(profile.TTSStyle) == "" {
+		return c.currentResult(StatusOperationFailed, "module does not support voice notification"), ErrVoiceUnsupported
+	}
+	// 两套方言的报文格式不同：移远要 UCS2 十六进制串，广和通直接吃明文。
+	hexText := ""
+	plainText := ""
+	switch profile.TTSStyle {
+	case TTSStyleGTTS:
+		plainText, err = sanitizeTTSText(message)
+		if err != nil {
+			return c.currentResult(StatusOperationFailed, "invalid voice text"), &ValidationError{Field: "message", Reason: err.Error()}
+		}
+	default:
+		hexText, err = pdu.EncodeTTS(message)
+		if err != nil {
+			return c.currentResult(StatusOperationFailed, "invalid voice text"), &ValidationError{Field: "message", Reason: err.Error()}
+		}
 	}
 	if err := c.acquire(ctx); err != nil {
 		return c.currentResult(StatusOperationFailed, "request canceled"), err
@@ -70,13 +81,14 @@ func (c *controller) SendVoice(ctx context.Context, number, message string) (Sta
 		return c.currentResult(StatusOperationFailed, err.Error()), nil
 	}
 
-	if _, err := c.command(ctx, fmt.Sprintf(`AT+QWTTS=1,1,1,"%s"`, hexText), 10*time.Second); err != nil {
+	ttsCommand := voiceTTSCommand(profile.TTSStyle, hexText, plainText)
+	if _, err := c.command(ctx, ttsCommand, 10*time.Second); err != nil {
 		if isContextError(err) {
 			return c.currentResult(StatusOperationFailed, "request canceled"), err
 		}
 		return c.currentResult(StatusOperationFailed, voiceFailureDetail("TTS start", err)), nil
 	}
-	if err := c.waitForTTS(ctx); err != nil {
+	if err := c.waitForTTS(ctx, profile.TTSStyle); err != nil {
 		if isContextError(err) {
 			return c.currentResult(StatusOperationFailed, "request canceled"), err
 		}
@@ -111,7 +123,7 @@ func (c *controller) waitForActiveCall(ctx context.Context) error {
 	}
 }
 
-func (c *controller) waitForTTS(ctx context.Context) error {
+func (c *controller) waitForTTS(ctx context.Context, style string) error {
 	deadline := time.Now().Add(40 * time.Second)
 	for {
 		if !time.Now().Before(deadline) {
@@ -120,7 +132,13 @@ func (c *controller) waitForTTS(ctx context.Context) error {
 		if err := wait(ctx, c.cfg.PollInterval); err != nil {
 			return err
 		}
-		reply, err := c.command(ctx, "AT+QWTTS?", 3*time.Second)
+		query := "AT+QWTTS?"
+		pattern := qwttsPattern
+		if style == TTSStyleGTTS {
+			query = "AT+GTTS?"
+			pattern = gttsIdlePattern
+		}
+		reply, err := c.command(ctx, query, 3*time.Second)
 		if err != nil {
 			if isContextError(err) {
 				return err
@@ -128,10 +146,10 @@ func (c *controller) waitForTTS(ctx context.Context) error {
 			if time.Now().After(deadline) {
 				return errors.New("TTS playback did not finish within 40s")
 			}
-			c.logger.Warn("AT+QWTTS? polling failed; continuing", "error", err)
+			c.logger.Warn("TTS progress polling failed; continuing", "query", query, "error", err)
 			continue
 		}
-		if qwttsPattern.MatchString(strings.Join(reply.Lines, "\n")) {
+		if pattern.MatchString(strings.Join(reply.Lines, "\n")) {
 			return nil
 		}
 	}
@@ -143,6 +161,29 @@ func (c *controller) hangup(ctx context.Context) {
 	if _, err := c.transport.Do(hangupCtx, "ATH"); err != nil {
 		c.logger.Warn("failed to hang up voice call", "error", err)
 	}
+}
+
+// voiceTTSCommand 按方言生成播报命令。
+// 移远吃 UCS2 十六进制串；广和通吃明文（参数含义待 Fibocom 手册确认）。
+func voiceTTSCommand(style, hexText, plainText string) string {
+	if style == TTSStyleGTTS {
+		return fmt.Sprintf("AT+GTTS=1,\"%s\",0", plainText)
+	}
+	return fmt.Sprintf("AT+QWTTS=1,1,1,\"%s\"", hexText)
+}
+
+// sanitizeTTSText 把播报文本清成单行、去掉会破坏 AT 命令的引号和换行。
+// 广和通的 AT+GTTS 直接吃明文，长度上限与移远一致（480 个 BMP 字符）。
+func sanitizeTTSText(message string) (string, error) {
+	replacer := strings.NewReplacer("\u000d", " ", "\u000a", " ", "\u0022", " ", "\u005c", " ")
+	cleaned := strings.Join(strings.Fields(replacer.Replace(message)), " ")
+	if cleaned == "" {
+		return "", fmt.Errorf("%w: voice text is empty", pdu.ErrTextTooLong)
+	}
+	if runes := []rune(cleaned); len(runes) > pdu.MaxTTSCharacters {
+		return "", fmt.Errorf("%w: %d BMP characters exceeds %d", pdu.ErrTextTooLong, len(runes), pdu.MaxTTSCharacters)
+	}
+	return cleaned, nil
 }
 
 func hasActiveCall(lines []string) bool {

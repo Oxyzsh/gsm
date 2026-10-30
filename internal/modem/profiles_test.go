@@ -27,11 +27,12 @@ func TestIdentifyModule(t *testing.T) {
 
 func TestProfileCommands(t *testing.T) {
 	em05 := profileFor(ModuleEM05CN, FirmwareA03)
-	if !em05.SupportsVoice || em05.DataUpCommand != "AT+cgact=1,1" || em05.SMSStorageCommand == "" {
+	if !em05.SupportsVoice || em05.TTSStyle != TTSStyleQWTTS || em05.DataUpCommand != "AT+cgact=1,1" || em05.SMSStorageCommand == "" {
 		t.Fatalf("unexpected EM05 profile: %+v", em05)
 	}
+	// L610 用自家的 AT+GTTS 做播报（没有移远的 QWTTS）。
 	l610 := profileFor(ModuleFibocom, FirmwareL610)
-	if l610.SupportsVoice || l610.DataDownCommand != "AT+GTRNDIS=0,1" || l610.DataUpCommand != "AT+GTRNDIS=1,1" {
+	if l610.SupportsVoice || l610.TTSStyle != TTSStyleNone || l610.DataDownCommand != "AT+GTRNDIS=0,1" || l610.DataUpCommand != "AT+GTRNDIS=1,1" {
 		t.Fatalf("unexpected L610 profile: %+v", l610)
 	}
 	if len(l610.ResetCommands) == 0 || l610.ResetCommands[0] != "AT+CFUN=15" {
