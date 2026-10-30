@@ -217,8 +217,8 @@ gsm/
 │       ├── server.go               # gRPC 服务实现
 │       └── server_test.go
 ├── api/
-│   ├── proto/pess/gsm/v1/gsm.proto # 接口定义（权威）
-│   └── gen/pess/gsm/v1/            # protoc 生成代码（随仓库保存）
+│   ├── proto/gsm/v1/gsm.proto # 接口定义（权威）
+│   └── gen/gsm/v1/            # protoc 生成代码（随仓库保存）
 ├── configs/
 │   └── gsm.yaml                    # 示例配置
 ├── deploy/
@@ -230,7 +230,7 @@ gsm/
 └── go.sum
 ```
 
-模块路径暂定 `go-pess/platform/user/pess/gsm`，与当前 GOPATH 布局（`d:/go/src`）一致。若迁移到公司代码仓库，只替换 `go.mod` 的 `module` 与 proto 的 `go_package`，其余 import 由工具重写。
+模块路径暂定 `gsm`，与当前 GOPATH 布局（`d:/go/src`）一致。若迁移到公司代码仓库，只替换 `go.mod` 的 `module` 与 proto 的 `go_package`，其余 import 由工具重写。
 
 ### 3.4 依赖
 
@@ -827,16 +827,16 @@ modem                         module
 
 ### 9.1 服务定义
 
-权威文件：`api/proto/pess/gsm/v1/gsm.proto`。
+权威文件：`api/proto/gsm/v1/gsm.proto`。
 
 ```proto
 syntax = "proto3";
 
-package pess.gsm.v1;
+package gsm.v1;
 
 import "google/protobuf/timestamp.proto";
 
-option go_package = "go-pess/platform/user/pess/gsm/api/gen/pess/gsm/v1;gsmv1";
+option go_package = "gsm/api/gen/gsm/v1;gsmv1";
 
 // GsmStatus 表示 4G 模块的可用状态。
 enum GsmStatus {
@@ -916,7 +916,7 @@ service GsmService {
 }
 ```
 
-生成代码路径：`api/gen/pess/gsm/v1/gsm.pb.go`、`api/gen/pess/gsm/v1/gsm_grpc.pb.go`，包名 `gsmv1`。生成代码随仓库保存，构建不依赖 `protoc`；`make proto` 用于重新生成。
+生成代码路径：`api/gen/gsm/v1/gsm.pb.go`、`api/gen/gsm/v1/gsm_grpc.pb.go`，包名 `gsmv1`。生成代码随仓库保存，构建不依赖 `protoc`；`make proto` 用于重新生成。
 
 ### 9.2 方法语义
 
@@ -971,15 +971,15 @@ service GsmService {
 
 ```bash
 # 状态
-grpcurl -plaintext 127.0.0.1:50051 pess.gsm.v1.GsmService/GetStatus
+grpcurl -plaintext 127.0.0.1:50051 gsm.v1.GsmService/GetStatus
 
 # 发短信
 grpcurl -plaintext -d '{"phone_number":"13612345678","message":"测试短信"}' \
-  127.0.0.1:50051 pess.gsm.v1.GsmService/SendSMS
+  127.0.0.1:50051 gsm.v1.GsmService/SendSMS
 
 # 语音
 grpcurl -plaintext -d '{"phone_number":"13612345678","message":"告警测试"}' \
-  127.0.0.1:50051 pess.gsm.v1.GsmService/SendVoice
+  127.0.0.1:50051 gsm.v1.GsmService/SendVoice
 ```
 
 Go 客户端：
@@ -1010,9 +1010,9 @@ if resp.GetStatus() != gsmv1.GsmStatus_GSM_STATUS_OK {
 
 ### 9.6 接口演进规则
 
-- `pess.gsm.v1` 为稳定版本；新增字段必须使用新编号，不得复用已删除编号。
+- `gsm.v1` 为稳定版本；新增字段必须使用新编号，不得复用已删除编号。
 - 不改变既有枚举值含义；新增状态值放在末尾。
-- 破坏性变更（删字段、改语义、改包名）升级为 `pess.gsm.v2`，新旧版本可并行一段时间。
+- 破坏性变更（删字段、改语义、改包名）升级为 `gsm.v2`，新旧版本可并行一段时间。
 - 生成代码与 proto 必须同时提交，保持可追溯。
 
 ---
@@ -1168,7 +1168,7 @@ Makefile 目标：
 protoc -I api/proto \
   --go_out=api/gen --go_opt=paths=source_relative \
   --go-grpc_out=api/gen --go-grpc_opt=paths=source_relative \
-  api/proto/pess/gsm/v1/gsm.proto
+  api/proto/gsm/v1/gsm.proto
 ```
 
 需要 `protoc-gen-go` 与 `protoc-gen-go-grpc`，版本在 README 或 Makefile 中固定。生成代码随仓库保存，常规构建不调用 `protoc`。

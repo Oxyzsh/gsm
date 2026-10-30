@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.5.1
 // - protoc             v5.29.3
-// source: pess/gsm/v1/gsm.proto
+// source: gsm/v1/gsm.proto
 
 package gsmv1
 
@@ -19,11 +19,11 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	GsmService_GetStatus_FullMethodName   = "/pess.gsm.v1.GsmService/GetStatus"
-	GsmService_SetEnabled_FullMethodName  = "/pess.gsm.v1.GsmService/SetEnabled"
-	GsmService_SendSMS_FullMethodName     = "/pess.gsm.v1.GsmService/SendSMS"
-	GsmService_SendVoice_FullMethodName   = "/pess.gsm.v1.GsmService/SendVoice"
-	GsmService_SetLogLevel_FullMethodName = "/pess.gsm.v1.GsmService/SetLogLevel"
+	GsmService_GetStatus_FullMethodName   = "/gsm.v1.GsmService/GetStatus"
+	GsmService_SetEnabled_FullMethodName  = "/gsm.v1.GsmService/SetEnabled"
+	GsmService_SendSMS_FullMethodName     = "/gsm.v1.GsmService/SendSMS"
+	GsmService_SendVoice_FullMethodName   = "/gsm.v1.GsmService/SendVoice"
+	GsmService_SetLogLevel_FullMethodName = "/gsm.v1.GsmService/SetLogLevel"
 )
 
 // GsmServiceClient is the client API for GsmService service.
@@ -244,7 +244,7 @@ func _GsmService_SetLogLevel_Handler(srv interface{}, ctx context.Context, dec f
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var GsmService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "pess.gsm.v1.GsmService",
+	ServiceName: "gsm.v1.GsmService",
 	HandlerType: (*GsmServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
@@ -269,5 +269,5 @@ var GsmService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "pess/gsm/v1/gsm.proto",
+	Metadata: "gsm/v1/gsm.proto",
 }

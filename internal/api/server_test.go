@@ -6,8 +6,8 @@ import (
 	"net"
 	"testing"
 
-	gsmv1 "go-pess/platform/user/pess/gsm/api/gen/pess/gsm/v1"
-	"go-pess/platform/user/pess/gsm/internal/modem"
+	gsmv1 "gsm/api/gen/gsm/v1"
+	"gsm/internal/modem"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"

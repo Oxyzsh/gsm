@@ -22,7 +22,7 @@ vet:
 	go vet ./...
 
 proto:
-	protoc -I api/proto --go_out=api/gen --go_opt=paths=source_relative --go-grpc_out=api/gen --go-grpc_opt=paths=source_relative api/proto/pess/gsm/v1/gsm.proto
+	protoc -I api/proto --go_out=api/gen --go_opt=paths=source_relative --go-grpc_out=api/gen --go-grpc_opt=paths=source_relative api/proto/gsm/v1/gsm.proto
 
 clean:
 	go clean

@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"go-pess/platform/user/pess/gsm/internal/at"
+	"gsm/internal/at"
 )
 
 type Status int

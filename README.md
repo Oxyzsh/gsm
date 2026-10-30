@@ -69,9 +69,9 @@ make proto
 默认 gRPC 监听 `127.0.0.1:50051`，并注册 server reflection：
 
 ```bash
-grpcurl -plaintext 127.0.0.1:50051 pess.gsm.v1.GsmService/GetStatus
+grpcurl -plaintext 127.0.0.1:50051 gsm.v1.GsmService/GetStatus
 grpcurl -plaintext -d '{"phone_number":"13612345678","message":"测试短信"}' \
-  127.0.0.1:50051 pess.gsm.v1.GsmService/SendSMS
+  127.0.0.1:50051 gsm.v1.GsmService/SendSMS
 ```
 
 ## 部署

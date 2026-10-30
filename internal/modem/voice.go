@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"go-pess/platform/user/pess/gsm/internal/at"
-	"go-pess/platform/user/pess/gsm/internal/pdu"
+	"gsm/internal/at"
+	"gsm/internal/pdu"
 )
 
 func (c *controller) SendVoice(ctx context.Context, number, message string) (StatusResult, error) {

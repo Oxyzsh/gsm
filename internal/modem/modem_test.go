@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"go-pess/platform/user/pess/gsm/internal/at"
+	"gsm/internal/at"
 )
 
 type fakeTransport struct {

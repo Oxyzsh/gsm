@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"time"
 
-	"go-pess/platform/user/pess/gsm/internal/modem"
+	"gsm/internal/modem"
 )
 
 type Config struct {

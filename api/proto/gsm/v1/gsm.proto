@@ -1,10 +1,10 @@
 syntax = "proto3";
 
-package pess.gsm.v1;
+package gsm.v1;
 
 import "google/protobuf/timestamp.proto";
 
-option go_package = "go-pess/platform/user/pess/gsm/api/gen/pess/gsm/v1;gsmv1";
+option go_package = "gsm/api/gen/gsm/v1;gsmv1";
 
 // GsmStatus 表示 4G 模块的可用状态。
 enum GsmStatus {

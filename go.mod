@@ -1,4 +1,4 @@
-module go-pess/platform/user/pess/gsm
+module gsm
 
 go 1.22.0
 

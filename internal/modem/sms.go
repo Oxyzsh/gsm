@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"go-pess/platform/user/pess/gsm/internal/at"
-	"go-pess/platform/user/pess/gsm/internal/pdu"
+	"gsm/internal/at"
+	"gsm/internal/pdu"
 )
 
 // SendSMS 发送短信，并把每次尝试的结果写进日志（号码打码）。

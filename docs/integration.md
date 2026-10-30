@@ -7,8 +7,8 @@
 - 默认地址：`127.0.0.1:50051`
 - 传输：HTTP/2 + gRPC
 - 消息：Protocol Buffers 3
-- 权威接口文件：`api/proto/pess/gsm/v1/gsm.proto`
-- 服务名：`pess.gsm.v1.GsmService`
+- 权威接口文件：`api/proto/gsm/v1/gsm.proto`
+- 服务名：`gsm.v1.GsmService`
 - 不提供 HTTP JSON、REST 或 ubus 接口
 
 `gsmd` 管理模块状态、短信、语音和模块控制；数据拨号仍由现场模块拨号工具或系统网络配置负责。
@@ -85,7 +85,7 @@ ssh -N -L 50051:127.0.0.1:50051 root@设备地址
 
 ```bash
 grpcurl -plaintext 127.0.0.1:50051 list
-grpcurl -plaintext 127.0.0.1:50051 pess.gsm.v1.GsmService/GetStatus
+grpcurl -plaintext 127.0.0.1:50051 gsm.v1.GsmService/GetStatus
 ```
 
 发送短信：
@@ -94,7 +94,7 @@ grpcurl -plaintext 127.0.0.1:50051 pess.gsm.v1.GsmService/GetStatus
 grpcurl -plaintext \
   -d '{"phone_number":"13612345678","message":"测试短信"}' \
   127.0.0.1:50051 \
-  pess.gsm.v1.GsmService/SendSMS
+  gsm.v1.GsmService/SendSMS
 ```
 
 语音：
@@ -103,7 +103,7 @@ grpcurl -plaintext \
 grpcurl -plaintext \
   -d '{"phone_number":"13612345678","message":"告警测试"}' \
   127.0.0.1:50051 \
-  pess.gsm.v1.GsmService/SendVoice
+  gsm.v1.GsmService/SendVoice
 ```
 
 禁用：
@@ -112,7 +112,7 @@ grpcurl -plaintext \
 grpcurl -plaintext \
   -d '{"enabled":false}' \
   127.0.0.1:50051 \
-  pess.gsm.v1.GsmService/SetEnabled
+  gsm.v1.GsmService/SetEnabled
 ```
 
 ## 7. Go 调用示例
@@ -127,7 +127,7 @@ import (
     "fmt"
     "time"
 
-    gsmv1 "go-pess/platform/user/pess/gsm/api/gen/pess/gsm/v1"
+    gsmv1 "gsm/api/gen/gsm/v1"
     "google.golang.org/grpc"
     "google.golang.org/grpc/credentials/insecure"
 )
@@ -172,7 +172,7 @@ func main() {
 }
 ```
 
-如果第三方仓库不能直接导入 `go-pess/platform/user/pess/gsm`，可复制 `.proto` 并用自定义 `go_package` 重新生成，消息字段和服务语义保持不变。
+如果第三方仓库不能直接导入 `gsm`，可复制 `.proto` 并用自定义 `go_package` 重新生成，消息字段和服务语义保持不变。
 
 ## 8. Python 调用示例
 
@@ -189,7 +189,7 @@ python -m grpc_tools.protoc \
   -I api/proto \
   --python_out=gen \
   --grpc_python_out=gen \
-  api/proto/pess/gsm/v1/gsm.proto
+  api/proto/gsm/v1/gsm.proto
 ```
 
 调用：
@@ -201,7 +201,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent / "gen"))
 
 import grpc
-from pess.gsm.v1 import gsm_pb2, gsm_pb2_grpc
+from gsm.v1 import gsm_pb2, gsm_pb2_grpc
 
 with grpc.insecure_channel("127.0.0.1:50051") as channel:
     stub = gsm_pb2_grpc.GsmServiceStub(channel)
@@ -243,8 +243,8 @@ with grpc.insecure_channel("127.0.0.1:50051") as channel:
 
 go-pess 的告警通知层已支持直接调用本机 Go `gsmd`：
 
-- `personal_sms` → `pess.gsm.v1.GsmService/SendSMS`
-- `personal_voice` → `pess.gsm.v1.GsmService/SendVoice`
+- `personal_sms` → `gsm.v1.GsmService/SendSMS`
+- `personal_voice` → `gsm.v1.GsmService/SendVoice`
 
 默认 gRPC 地址：
 

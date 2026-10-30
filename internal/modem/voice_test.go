@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"go-pess/platform/user/pess/gsm/internal/at"
+	"gsm/internal/at"
 )
 
 func newVoiceTestController(t *testing.T, transport Transport, moduleType string) Controller {

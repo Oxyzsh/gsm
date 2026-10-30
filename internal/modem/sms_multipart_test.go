@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"go-pess/platform/user/pess/gsm/internal/at"
+	"gsm/internal/at"
 )
 
 // TestSendSMSMultipartSharesRefAndStopsOnFailure 覆盖长短信：多段共用一个 reference，
